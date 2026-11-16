@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
 /** What the run form opens with: an existing run to edit, or a date and type to pre-fill. */
 data class FormSeed(val run: Run? = null, val date: LocalDate = LocalDate.now(), val type: String = "easy", val fresh: Boolean = false)
 
-val TABS = listOf("Today", "Plan", "Learn", "Progress", "Setup")
+val TABS = listOf("Today", "Plan", "Progress")
 
 @Composable
 fun App(vm: AppVM) {
@@ -66,6 +66,7 @@ fun App(vm: AppVM) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var lesson by remember { mutableStateOf<Lesson?>(null) }
     var rerunGuide by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf<String?>(null) }      // the pages behind the gear: menu, learn, settings, about, privacy, licences
     var replayIntro by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.toast) { vm.toast?.let { snack.showSnackbar(it); vm.toast = null } }
@@ -79,9 +80,10 @@ fun App(vm: AppVM) {
     val guide = !vm.settings.onboarded || rerunGuide
     val reward = vm.celebration
     val running = Live.snap.active || live != null
-    val chrome = !guide && reward == null && form == null && lesson == null && !running
-    BackHandler(enabled = form != null || lesson != null || reward != null || (live != null && !Live.snap.active) || (guide && vm.settings.onboarded)) {
-        when { live != null -> live = null; form != null -> form = null; lesson != null -> lesson = null; reward != null -> vm.celebration = null; else -> rerunGuide = false }
+    val chrome = !guide && reward == null && form == null && lesson == null && !running && more == null
+    BackHandler(enabled = form != null || lesson != null || reward != null || more != null || (live != null && !Live.snap.active) || (guide && vm.settings.onboarded)) {
+        when { live != null -> live = null; form != null -> form = null; lesson != null -> lesson = null; reward != null -> vm.celebration = null
+            guide -> rerunGuide = false; more == "menu" -> more = null; more == "privacy" || more == "licences" -> more = "about"; more != null -> more = "menu" }
     }
 
     Scaffold(containerColor = p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(tab) { tab = it } }) { pad ->
@@ -94,19 +96,20 @@ fun App(vm: AppVM) {
                     if (reward.celebrate) Confetti()
                 }
                 form != null -> Page { RunForm(vm, e, form!!) { form = null } }
+                lesson == null && more != null -> Page {
+                    MoreScreen(vm, e, more!!, go = { more = it }, openLesson = { lesson = it }, replayIntro = { more = null; replayIntro = true }, rerunGuide = { more = null; rerunGuide = true })
+                }
                 lesson != null -> Page { LessonScreen(lesson!!, already = lesson!!.id in vm.settings.lessonsDone, close = { lesson = null }) { vm.finishLesson(lesson!!.id); lesson = null } }
                 else -> AnimatedContent(tab, transitionSpec = {
                     val dir = if (targetState > initialState) 1 else -1
                     (fadeIn(tween(220)) + slideInHorizontally(tween(260)) { dir * it / 10 }) togetherWith fadeOut(tween(120))
                 }, label = "tab") { t ->
                     Page {
-                        TopBar(e, vm.settings.gameOn) { tab = 3 }
+                        TopBar(e, vm.settings.gameOn, openMore = { more = "menu" }) { tab = 2 }
                         when (t) {
-                            0 -> TodayScreen(vm, e, openPlan = { tab = 1 }, openSetup = { tab = 4 }, openLesson = { lesson = it }, openLive = { live = it }) { form = it }
+                            0 -> TodayScreen(vm, e, openPlan = { tab = 1 }, openSetup = { more = "settings" }, openLesson = { lesson = it }, openLive = { live = it }) { form = it }
                             1 -> PlanScreen(vm, e) { form = it }
-                            2 -> LearnScreen(vm.settings) { lesson = it }
-                            3 -> ProgressScreen(vm, e) { form = it }
-                            else -> SetupScreen(vm, e, replayIntro = { replayIntro = true }) { rerunGuide = true }
+                            else -> ProgressScreen(vm, e) { form = it }
                         }
                     }
                 }
@@ -143,9 +146,9 @@ fun TabBar(tab: Int, onTab: (Int) -> Unit) {
 }
 
 @Composable
-fun TopBar(e: Engine, gameOn: Boolean, openProgress: () -> Unit) {
+fun TopBar(e: Engine, gameOn: Boolean, openMore: () -> Unit, openProgress: () -> Unit) {
     val p = LocalPal.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("ZONE 2 RUNNING", Modifier.weight(1f), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
         if (gameOn) {
             val g = e.game
@@ -158,5 +161,6 @@ fun TopBar(e: Engine, gameOn: Boolean, openProgress: () -> Unit) {
                 Text(if (g.streak == 1) "week" else "weeks", fontSize = 12.5.sp, color = p.muted, fontFamily = BodyFont)
             }
         }
+        Gear(Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(p.surface).border(1.dp, p.line, androidx.compose.foundation.shape.CircleShape).clickable(onClick = openMore).padding(9.dp))
     }
 }

@@ -3,6 +3,7 @@ package app.zone2running
 import android.graphics.Bitmap
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -51,7 +52,20 @@ class ScreensTest {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
         shot("today")
-        for (t in listOf("PLAN", "LEARN", "PROGRESS")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
+        for (t in listOf("PLAN", "PROGRESS")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
+        rule.onNodeWithText("LEARN").assertDoesNotExist(); rule.onNodeWithText("SETUP").assertDoesNotExist()
+        // Everything else lives behind the cog.
+        rule.onNodeWithContentDescription("Settings").performClick(); rule.waitForIdle(); shot("more")
+        rule.onNodeWithText("Learn").performClick(); rule.waitForIdle(); shot("learn")
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("Settings").performClick(); rule.waitForIdle(); shot("settings")
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("About").performClick(); rule.waitForIdle(); shot("about")
+        rule.onNodeWithText("Privacy policy").performClick(); rule.waitForIdle(); shot("privacy")
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("Licences and credits").performClick(); rule.waitForIdle(); shot("licences")
+        rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick()
+        rule.waitForIdle(); rule.onNodeWithText("TODAY").assertExists()
         rule.onNodeWithText("PROGRESS").performClick()
         rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("runs")
         rule.onNodeWithText("Badges").performClick(); rule.waitForIdle(); shot("badges")
@@ -65,7 +79,8 @@ class ScreensTest {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
         shot("today-dark")
-        rule.onNodeWithText("LEARN").performClick(); rule.waitForIdle(); shot("learn-dark")
+        rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Learn").performClick(); rule.waitForIdle(); shot("learn-dark")
+        rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick()
         rule.onNodeWithText("PROGRESS").performClick(); rule.waitForIdle(); shot("progress-dark")
     }
 
@@ -141,7 +156,7 @@ class ScreensTest {
             vm.updateSettings { it.copy(miles = true, raceName = "City Half", raceDate = today.plusDays(40), raceKm = 21.1) }
             rule.onNodeWithText("TODAY").performClick(); rule.waitForIdle()
             rule.onNodeWithText("City Half · 13.1 mi").assertExists(); shot("today-miles-race")
-            rule.onNodeWithText("SETUP").performClick(); rule.waitForIdle(); shot("setup")
+            rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Settings").performClick(); rule.waitForIdle(); shot("setup")
         } finally { U.miles = false }
     }
 
@@ -154,7 +169,7 @@ class ScreensTest {
     @Test fun lessonEarnsXp() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
-        rule.onNodeWithText("LEARN").performClick()
+        rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Learn").performClick()
         rule.onNodeWithText("Why not hard every day?").performClick(); rule.waitForIdle(); shot("lesson-card")
         rule.onNodeWithText("Next").performClick(); rule.onNodeWithText("Next").performClick(); rule.onNodeWithText("Quick question").performClick()
         rule.onNodeWithText("It is too slow to count").performClick(); rule.waitForIdle()

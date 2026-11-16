@@ -194,24 +194,11 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     }
 
     Panel {
-        val ctx = androidx.compose.ui.platform.LocalContext.current
-        val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-        var crash by remember { mutableStateOf(Diagnostics.lastCrash(ctx)) }
-        Head("Help and diagnostics")
-        Body(if (crash != null) "The app closed unexpectedly on ${crash!!.lineSequence().first().take(16).replace('T', ' ')}. Copy the report and send it with a line on what you were doing." else "If something goes wrong, copy this report into your message. It holds the app version, phone model and settings switches, and no runs, heart rates or locations.")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Btn("Copy report", ghost = true, small = true) { clip.setText(androidx.compose.ui.text.AnnotatedString(Diagnostics.report(ctx, vm.data, vm.healthGranted))); vm.toast = "Report copied" }
-            if (crash != null) Btn("Clear", ghost = true, small = true) { Diagnostics.clear(ctx); crash = null }
-        }
-        if (BuildConfig.UPDATE_REPO.isNotBlank()) Toggle("Check for new versions", "Asks GitHub once when you open the app. Off by default.", s.updateCheck) { v -> vm.updateSettings { it.copy(updateCheck = v) } }
-    }
-
-    Panel {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
         }
-        Small("Zone 2 Running ${BuildConfig.VERSION_NAME} · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("The guide asks the setup questions again. The intro is Dil's two-minute story.")
     }
 }
 
@@ -525,5 +512,23 @@ fun RewardScreen(c: Celebration, share: () -> Unit, done: () -> Unit) {
             Btn("Done", onClick = done)
             Btn("Share", ghost = true, onClick = share)
         }
+    }
+}
+
+/** Crash report and update switch, shown on the About page. */
+@Composable
+fun DiagnosticsPanel(vm: AppVM) {
+    val s = vm.settings
+    Panel {
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+        var crash by remember { mutableStateOf(Diagnostics.lastCrash(ctx)) }
+        Head("Help and diagnostics")
+        Body(if (crash != null) "The app closed unexpectedly on ${crash!!.lineSequence().first().take(16).replace('T', ' ')}. Copy the report and send it with a line on what you were doing." else "If something goes wrong, copy this report into your message. It holds the app version, phone model and settings switches, and no runs, heart rates or locations.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("Copy report", ghost = true, small = true) { clip.setText(androidx.compose.ui.text.AnnotatedString(Diagnostics.report(ctx, vm.data, vm.healthGranted))); vm.toast = "Report copied" }
+            if (crash != null) Btn("Clear", ghost = true, small = true) { Diagnostics.clear(ctx); crash = null }
+        }
+        if (BuildConfig.UPDATE_REPO.isNotBlank()) Toggle("Check for new versions", "Asks GitHub once when you open the app. Off by default.", s.updateCheck) { v -> vm.updateSettings { it.copy(updateCheck = v) } }
     }
 }

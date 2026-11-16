@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient

@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background

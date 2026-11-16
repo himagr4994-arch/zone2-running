@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import android.app.Application
 import android.content.Intent
@@ -49,7 +49,7 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
         else -> "Good work"
     }
     val share = buildString {
-        append("Easy Seven · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}\n$summary\n")
+        append("Zone 2 Running · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}\n$summary\n")
         after.current?.let { append("Zone 2 pace now ${fmtPace(it)} /km, target ${fmtPace(after.s.targetPace.toDouble())}\n") }
         append("Level ${g.level} ${levelName(g.level)} · ${g.streak} week streak")
         if (nb.isNotEmpty()) append("\nUnlocked: " + nb.joinToString { it.name })
@@ -129,7 +129,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             // Folder access belongs to this phone, not to the backup file.
             commit(d.copy(settings = d.settings.copy(backupTree = settings.backupTree, lastBackup = settings.lastBackup)))
             "Restored ${d.runs.size} run${if (d.runs.size == 1) "" else "s"}"
-        } catch (e: Exception) { "That file isn't an Easy Seven backup" }
+        } catch (e: Exception) { "That file isn't an Zone 2 Running backup" }
     }
 
     fun setBackupFolder(uri: Uri) {

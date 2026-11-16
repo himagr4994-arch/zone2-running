@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull

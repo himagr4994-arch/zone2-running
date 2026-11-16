@@ -1,8 +1,8 @@
-# Easy Seven
+# Zone 2 Running
 
 **Get faster at an easy heart rate.**
 
-Easy Seven is a small Android app for one goal: bringing your Zone 2 pace down to a target you choose (7:00 /km by default). It turns every steady run into "the pace you would hold at Zone 2 heart rate", tracks that number over time, and gives you a weekly plan built around it. Everything stays on your phone.
+Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace down to a target you choose (7:00 /km by default). It turns every steady run into "the pace you would hold at Zone 2 heart rate", tracks that number over time, and gives you a weekly plan built around it. Everything stays on your phone.
 
 ## What it does
 
@@ -29,7 +29,7 @@ No account, no server, no analytics, and no internet permission. See [docs/priva
 - **Current Zone 2 pace** is the average of your last three estimates.
 - **Streak**: a week counts when about three-quarters of its planned runs are done.
 
-All of this lives in [`Engine.kt`](app/src/main/java/app/easyseven/Engine.kt), which is plain Kotlin with unit tests.
+All of this lives in [`Engine.kt`](app/src/main/java/app/zone2running/Engine.kt), which is plain Kotlin with unit tests.
 
 ## Build
 

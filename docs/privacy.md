@@ -1,6 +1,6 @@
 # Privacy
 
-Easy Seven has no account, no server, no analytics and no trackers. The app does not request the internet permission, so it cannot send anything anywhere.
+Zone 2 Running has no account, no server, no analytics and no trackers. The app does not request the internet permission, so it cannot send anything anywhere.
 
 ## Where your data lives
 
@@ -16,4 +16,4 @@ Easy Seven has no account, no server, no analytics and no trackers. The app does
 | Health Connect: read heart rate | Average and highest heart rate for each run |
 | Health Connect: read distance | Distance for each run |
 
-Health Connect access is optional and read-only. Easy Seven never writes to Health Connect. You can remove access at any time in Android's Health Connect settings.
+Health Connect access is optional and read-only. Zone 2 Running never writes to Health Connect. You can remove access at any time in Android's Health Connect settings.

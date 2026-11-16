@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -62,7 +62,7 @@ val Display = FontFamily(Font(R.font.barlowcondensed_semibold, FontWeight.SemiBo
 val BodyFont = FontFamily(Font(R.font.barlow_regular, FontWeight.Normal), Font(R.font.barlow_medium, FontWeight.Medium), Font(R.font.barlow_semibold, FontWeight.SemiBold))
 
 @Composable
-fun EasyTheme(content: @Composable () -> Unit) {
+fun AppTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val p = if (dark) DarkPal else LightPal
     val base = if (dark) darkColorScheme() else lightColorScheme()

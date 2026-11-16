@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -70,7 +70,7 @@ val TYPE_NAMES = linkedMapOf(
 val DOW = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 val MONTHS_FULL = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
-val LEVEL_NAMES = listOf("Starter", "Jogger", "Base Builder", "Steady", "Aerobic", "Engine", "Diesel", "Metronome", "Long Hauler", "Tireless", "Marathon Heart", "Easy Seven")
+val LEVEL_NAMES = listOf("Starter", "Jogger", "Base Builder", "Steady", "Aerobic", "Engine", "Diesel", "Metronome", "Long Hauler", "Tireless", "Marathon Heart", "Zone 2 Master")
 
 fun levelName(n: Int) = LEVEL_NAMES.getOrElse(n - 1) { "Level $n" }
 fun fmtPace(sec: Double): String { val s = sec.roundToInt(); return "${s / 60}:${(s % 60).toString().padStart(2, '0')}" }

@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -43,21 +43,21 @@ class ScreensTest {
 
     @Test fun everyTabLight() {
         val vm = seeded()
-        rule.setContent { EasyTheme { App(vm) } }
+        rule.setContent { AppTheme { App(vm) } }
         shot("today")
         for (t in listOf("PLAN", "LOG", "PROGRESS", "SETUP")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
     }
 
     @Test @Config(qualifiers = "w400dp-h2500dp-night-xhdpi") fun todayAndProgressDark() {
         val vm = seeded()
-        rule.setContent { EasyTheme { App(vm) } }
+        rule.setContent { AppTheme { App(vm) } }
         shot("today-dark")
         rule.onNodeWithText("PROGRESS").performClick(); rule.waitForIdle(); shot("progress-dark")
     }
 
     @Test fun guideThenFirstRunEarnsReward() {
         val vm = AppVM(ApplicationProvider.getApplicationContext())
-        rule.setContent { EasyTheme { App(vm) } }
+        rule.setContent { AppTheme { App(vm) } }
         shot("guide-1")
         rule.onNodeWithText("Next").performClick()
         rule.onNodeWithText("Pace (min/km)").performTextInput("8:10")

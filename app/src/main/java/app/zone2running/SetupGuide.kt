@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -120,11 +120,11 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
         when {
             !vm.health.available() -> Body("Health Connect isn't available on this phone, so runs are added by hand.", p.muted)
             !vm.healthGranted -> {
-                Body("Import runs recorded by your watch app, Strava or any app that writes to Health Connect. Easy Seven only reads runs, their distance and heart rate. Nothing is written back and nothing leaves your phone.")
+                Body("Import runs recorded by your watch app, Strava or any app that writes to Health Connect. Zone 2 Running only reads runs, their distance and heart rate. Nothing is written back and nothing leaves your phone.")
                 Btn("Connect Health Connect") { ask.launch(vm.health.permissions) }
             }
             else -> {
-                NoteBox(Note("good", "Connected. Easy Seven reads runs, distance and heart rate."))
+                NoteBox(Note("good", "Connected. Zone 2 Running reads runs, distance and heart rate."))
                 Toggle("Import new runs automatically", "Checks each time you open the app.", s.autoImport) { v -> vm.updateSettings { it.copy(autoImport = v) } }
                 Btn(if (vm.importing) "Importing…" else "Import now", ghost = true) { vm.importHealth(manual = true) }
             }
@@ -139,7 +139,7 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
         val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { confirmRestore = it }
         val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(vm::setBackupFolder) }
         if (s.backupTree.isEmpty()) {
-            Small("Pick a folder and Easy Seven writes a backup there once a day, keeping the last seven. Choose one that syncs or survives a reset, like Documents.")
+            Small("Pick a folder and Zone 2 Running writes a backup there once a day, keeping the last seven. Choose one that syncs or survives a reset, like Documents.")
             Btn("Choose a backup folder") { folder.launch(null) }
         } else {
             NoteBox(Note("good", "Daily backup is on." + if (s.lastBackup.isNotEmpty()) " Last written ${s.lastBackup}." else ""))
@@ -149,7 +149,7 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Btn("Export a backup", ghost = true) { save.launch("easy-seven-${LocalDate.now()}.json") }
+            Btn("Export a backup", ghost = true) { save.launch("zone2-running-${LocalDate.now()}.json") }
             Btn("Restore", ghost = true) { open.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }
         }
         confirmRestore?.let { uri ->
@@ -162,7 +162,7 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
 
     Panel {
         Btn("Run the setup guide again", ghost = true, onClick = rerunGuide)
-        Small("Easy Seven 0.1.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("Zone 2 Running 0.1.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
     }
 }
 
@@ -211,7 +211,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
         else -> ""
     }
 
-    Text("EASY SEVEN", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
+    Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
     Panel {
         Label("Step ${step + 1} of 5")
         when (step) {
@@ -305,7 +305,7 @@ fun RewardScreen(c: Celebration, gameOn: Boolean, done: () -> Unit) {
     val p = LocalPal.current
     val clip = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
-    Text("EASY SEVEN", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
+    Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
     Panel {
         Label("Run logged")
         Head(c.title)

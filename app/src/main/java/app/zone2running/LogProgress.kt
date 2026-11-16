@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import android.graphics.Paint
 import android.graphics.Typeface

@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { EasyTheme { App(vm) } }
+        setContent { AppTheme { App(vm) } }
     }
 
     override fun onResume() { super.onResume(); vm.refreshHealth() }
@@ -108,7 +108,7 @@ fun TabBar(tab: Int, onTab: (Int) -> Unit) {
 @Composable
 fun TopBar(e: Engine, gameOn: Boolean, openProgress: () -> Unit) {
     val p = LocalPal.current
-    Text("EASY SEVEN", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
+    Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
     if (gameOn) {
         val g = e.game
         val shape = RoundedCornerShape(14.dp)

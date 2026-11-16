@@ -13,10 +13,10 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "app.easyseven"
+    namespace = "app.zone2running"
     compileSdk = 36
     defaultConfig {
-        applicationId = "app.easyseven"
+        applicationId = "app.zone2running"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

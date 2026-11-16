@@ -1,4 +1,4 @@
-package app.easyseven
+package app.zone2running
 
 import android.content.Context
 import android.net.Uri
@@ -27,7 +27,7 @@ object Json {
                 .put("durSec", r.durSec).put("avgHr", r.avgHr).put("maxHr", r.maxHr).put("feel", r.feel)
                 .put("notes", r.notes).put("source", r.source)
         )
-        return JSONObject().put("app", "easy-seven").put("version", 1).put("settings", so).put("runs", ra)
+        return JSONObject().put("app", "zone2-running").put("version", 1).put("settings", so).put("runs", ra)
             .put("hidden", JSONArray(d.hidden.toList())).toString(2)
     }
 
@@ -63,19 +63,19 @@ object Json {
 }
 
 class Store(private val ctx: Context) {
-    private val file = File(ctx.filesDir, "easy-seven.json")
+    private val file = File(ctx.filesDir, "zone2-running.json")
 
     fun load(): AppData {
         if (!file.exists()) return AppData()
         return try { Json.decode(file.readText()) } catch (e: Exception) {
             // Never overwrite a file we could not read: set it aside for recovery.
-            file.copyTo(File(ctx.filesDir, "easy-seven.unreadable.json"), overwrite = true)
+            file.copyTo(File(ctx.filesDir, "zone2-running.unreadable.json"), overwrite = true)
             AppData()
         }
     }
 
     fun save(d: AppData) {
-        val tmp = File(ctx.filesDir, "easy-seven.json.tmp")
+        val tmp = File(ctx.filesDir, "zone2-running.json.tmp")
         tmp.writeText(Json.encode(d))
         if (!tmp.renameTo(file)) { file.writeText(tmp.readText()); tmp.delete() }
     }
@@ -95,12 +95,12 @@ class Store(private val ctx: Context) {
         if (d.settings.backupTree.isEmpty() || d.settings.lastBackup == today.toString()) return null
         val dir = DocumentFile.fromTreeUri(ctx, Uri.parse(d.settings.backupTree)) ?: return null
         if (!dir.canWrite()) return null
-        val name = "easy-seven-$today.json"
+        val name = "zone2-running-$today.json"
         val fresh = dir.createFile("application/json", "$name.new") ?: return null
         export(fresh.uri, d)
         dir.findFile(name)?.delete()          // yesterday's file stays until the new one is in place
         fresh.renameTo(name)
-        dir.listFiles().filter { (it.name ?: "").matches(Regex("easy-seven-\\d{4}-\\d{2}-\\d{2}\\.json")) }
+        dir.listFiles().filter { (it.name ?: "").matches(Regex("zone2-running-\\d{4}-\\d{2}-\\d{2}\\.json")) }
             .sortedByDescending { it.name }.drop(7).forEach { it.delete() }
         return today.toString()
     }

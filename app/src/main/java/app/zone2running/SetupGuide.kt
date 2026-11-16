@@ -15,8 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -35,7 +34,7 @@ private fun Toggle(title: String, sub: String, on: Boolean, onChange: (Boolean) 
 }
 
 @Composable
-fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
+fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () -> Unit) {
     val p = LocalPal.current
     val s = vm.settings
 
@@ -111,7 +110,8 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
 
     Panel {
         Head("Motivation")
-        Toggle("Levels, streaks and badges", "Turn off for a calmer app: progress, plan and coaching only.", s.gameOn) { v -> vm.updateSettings { it.copy(gameOn = v) } }
+        Toggle("Levels, streaks, quests and badges", "Turn off for a calmer app: progress, plan and coaching only.", s.gameOn) { v -> vm.updateSettings { it.copy(gameOn = v) } }
+        ReminderPicker(s.remindOn, s.remindMin) { on, m -> vm.setReminder(on, m) }
     }
 
     Panel {
@@ -161,9 +161,33 @@ fun SetupScreen(vm: AppVM, e: Engine, rerunGuide: () -> Unit) {
     }
 
     Panel {
-        Btn("Run the setup guide again", ghost = true, onClick = rerunGuide)
-        Small("Zone 2 Running 0.1.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("Setup guide", ghost = true, onClick = rerunGuide)
+            Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
+        }
+        Small("Zone 2 Running 0.2.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
     }
+}
+
+/** Daily reminder: the runner picks a time first, then Android asks for permission. */
+@Composable
+fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var denied by remember { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> denied = !ok; onChange(ok, minutes) }
+    Toggle("Daily reminder", "One nudge on run days, and when your streak is at risk. Nothing on days with nothing to say.", on) { v ->
+        if (v && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else onChange(v, minutes)
+    }
+    if (on) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            listOf(360, 390, 420, 1080, 1140, 1200).forEach { m ->
+                val h = m / 60; val label = "${if (h > 12) h - 12 else h}${if (m % 60 == 30) ":30" else ""} ${if (h >= 12) "pm" else "am"}"
+                Pick(label, minutes == m, Modifier.weight(1f)) { onChange(true, m) }
+            }
+        }
+        NoteBox(Note("plain", "Preview: “Today: Easy run · 40 min. Keep HR in Zone 2.”"))
+    }
+    if (denied) Small("Notifications are blocked for this app. You can allow them in Android settings.")
 }
 
 private val LEVELS = listOf(Triple("Just starting", "Under 10 km a week", Triple(25, 40, false)), Triple("Running regularly", "10–25 km a week", Triple(35, 60, true)), Triple("Experienced", "More than 25 km a week", Triple(45, 80, true)))
@@ -187,6 +211,9 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
     var easy by remember { mutableStateOf("${s0.easyMin}") }
     var long by remember { mutableStateOf("${s0.longMin}") }
     var quality by remember { mutableStateOf(s0.quality) }
+    var goalWeeks by remember { mutableIntStateOf(s0.goalWeeks) }
+    var remind by remember { mutableStateOf(s0.remindOn) }
+    var remindMin by remember { mutableIntStateOf(s0.remindMin) }
     var error by remember { mutableStateOf("") }
 
     fun built(): Settings {
@@ -199,7 +226,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
             basePace = if (base) cp else s0.basePace, baseHr = if (base) h else s0.baseHr, baseDate = if (base) (s0.baseDate ?: today) else s0.baseDate,
             days = days.sorted(), longDay = longDay, easyMin = easy.toIntOrNull()?.takeIf { it in 15..90 } ?: s0.easyMin,
             longMin = long.toIntOrNull()?.takeIf { it in 30..180 } ?: s0.longMin, quality = quality,
-            planStart = s0.planStart ?: mondayOf(today), onboarded = true,
+            planStart = s0.planStart ?: mondayOf(today), onboarded = true, goalWeeks = goalWeeks, remindOn = remind, remindMin = remindMin,
         )
     }
     fun check(): String = when (step) {
@@ -212,8 +239,9 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
     }
 
     Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
+    Meter(animFloat((step + 1) / 6f, 350), Modifier.height(6.dp))
     Panel {
-        Label("Step ${step + 1} of 5")
+        Label("Step ${step + 1} of 6")
         when (step) {
             0 -> {
                 Head("What easy pace are you chasing?")
@@ -265,6 +293,21 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                 }
                 Toggle("One harder session a week", "Needs 4 or more running days.", quality) { quality = it }
             }
+            4 -> {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { Dil("hello", Modifier.size(64.dp)); Head("Make it stick", modifier = Modifier.weight(1f)) }
+                Body("Easy running pays off over weeks, not days. How long will you give it?", p.muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(4 to "A fair try", 8 to "Real change", 12 to "New habit").forEach { (w, t) ->
+                        val shape = RoundedCornerShape(10.dp); val on = goalWeeks == w
+                        Column(Modifier.weight(1f).clip(shape).background(if (on) p.goodBg else p.surface2).border(if (on) 2.dp else 1.dp, if (on) p.accent else p.line, shape).clickable { goalWeeks = w }.padding(vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("$w", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 30.sp, color = p.ink); Small("weeks"); Small(t, p.ink)
+                        }
+                    }
+                }
+                Small("A week counts when you finish about three-quarters of its runs. Miss one and a rest pass covers it.")
+                ReminderPicker(remind, remindMin) { on, m -> remind = on; remindMin = m }
+            }
             else -> {
                 val e = Engine(built(), vm.data.runs, today)
                 val c = e.current; val tg = e.s.targetPace.toDouble(); val gap = (c ?: tg) - tg
@@ -285,40 +328,43 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                         Column { Text("${ses.title} · ${ses.min} min", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, fontFamily = BodyFont); Small(ses.detail) }
                     }
                 }
-                Small("Your Zone 2 is ${e.zb[1]}–${e.zb[2] - 1} bpm. Each week builds by about 8%, every fourth week is lighter and ends with a re-test.")
+                NoteBox(Note("plain", "Built from your answers: Zone 2 of ${e.zb[1]}–${e.zb[2] - 1} bpm from max ${e.s.maxHr} and resting ${e.s.restHr}. ${plan.ses.size} runs on the days you picked. A $goalWeeks-week streak to aim for. All of it can be changed in Setup."))
             }
         }
         if (error.isNotEmpty()) NoteBox(Note("warn", error))
         Row {
             if (step > 0 || canClose) Btn(if (step == 0) "Close" else "Back", ghost = true) { error = ""; if (step == 0) close() else step-- }
             Spacer(Modifier.weight(1f))
-            Btn(if (step == 4) "Start training" else "Next") {
+            Btn(if (step == 5) "Start training" else if (step == 4) "I'm in for $goalWeeks weeks" else "Next") {
                 error = check()
-                if (error.isEmpty()) { if (step < 4) step++ else { val b = built(); vm.updateSettings { b }; vm.refreshHealth(); close() } }
+                if (error.isEmpty()) { if (step < 5) step++ else { val b = built(); vm.updateSettings { b }; vm.setReminder(b.remindOn, b.remindMin); vm.refreshHealth(); close() } }
             }
         }
     }
 }
 
 @Composable
-fun RewardScreen(c: Celebration, gameOn: Boolean, done: () -> Unit) {
+fun RewardScreen(c: Celebration, share: () -> Unit, done: () -> Unit) {
     val p = LocalPal.current
-    val clip = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
+    val pop = enter(650, 100)
     Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
     Panel {
-        Label("Run logged")
-        Head(c.title)
-        Text("+${c.xp} XP", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 76.sp, lineHeight = 72.sp, color = p.accent)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Dil(if (c.celebrate) "proud" else "calm", Modifier.size((56 + 24 * pop).dp))
+            Column { Label("Run logged"); Head(if (c.streakMilestone > 0) "${c.streakMilestone}-week streak!" else c.title) }
+        }
+        Text("+${(c.xp * pop).toInt()} XP", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 76.sp, lineHeight = 72.sp, color = p.accent)
         LevelBar(c.game)
         Body(c.message)
         NoteBox(Note("plain", c.summary + (c.estLine?.let { "\n$it" } ?: "")))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Flame(if (c.streakOn) p.hard else p.muted); Small(c.streakLine, p.ink) }
-        if (c.newBadges.isNotEmpty()) c.newBadges.chunked(4).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { Medal(it, Modifier.weight(1f)) }; repeat(4 - row.size) { Spacer(Modifier.weight(1f)) } } }
+        if (c.newBadges.isNotEmpty()) c.newBadges.chunked(4).forEach { row ->
+            Row(Modifier.graphicsLayer { scaleX = .6f + .4f * pop; scaleY = .6f + .4f * pop; alpha = pop }, horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { Medal(it, Modifier.weight(1f)) }; repeat(4 - row.size) { Spacer(Modifier.weight(1f)) } }
+        }
         c.records.forEach { NoteBox(Note("good", it)) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Btn("Done", onClick = done)
-            Btn(if (copied) "Copied" else "Copy summary", ghost = true) { clip.setText(AnnotatedString(c.share)); copied = true }
+            Btn("Share", ghost = true, onClick = share)
         }
     }
 }

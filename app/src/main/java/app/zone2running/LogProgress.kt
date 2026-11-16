@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -46,7 +47,7 @@ import kotlin.math.roundToInt
 @Composable
 fun LogScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
-    Panel {
+    Panel(Modifier.rise(1)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Head("Runs", modifier = Modifier.weight(1f))
             if (vm.healthGranted) Btn(if (vm.importing) "Importing…" else "Import", ghost = true, small = true) { vm.importHealth(manual = true) }
@@ -96,6 +97,14 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
 
     Panel {
         Head(if (r0 == null) "Log a run" else "Edit run")
+        if (r0 != null && r0.zoneSec.size == 5 && r0.zoneSec.sum() > 0) {
+            val tot = r0.zoneSec.sum().toFloat()
+            Small("Time in each zone, from your heart-rate samples")
+            Row(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                r0.zoneSec.forEachIndexed { i, sec -> if (sec > 0) Box(Modifier.weight(sec / tot).fillMaxHeight().background(p.zones[i])) }
+            }
+            Small(r0.zoneSec.mapIndexedNotNull { i, sec -> if (sec >= 60) "Z${i + 1} ${sec / 60} min" else null }.joinToString(" · "))
+        }
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, p.line, RoundedCornerShape(10.dp)).clickable { picking = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { Small("Date"); Body("${DOW[date.dayOfWeek.value - 1]} ${fmtDay(date)} ${date.year}") }
             Small("Change", p.accent)
@@ -153,10 +162,21 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
 }
 
 @Composable
-fun ProgressScreen(e: Engine, gameOn: Boolean) {
+fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
     val g = e.game
-    if (gameOn) Panel {
+    val gameOn = vm.settings.gameOn
+    var seg by remember { mutableIntStateOf(0) }
+    val segs = if (gameOn) listOf("Stats", "Runs", "Badges") else listOf("Stats", "Runs")
+    Row(Modifier.rise(0).clip(RoundedCornerShape(12.dp)).background(p.surface2).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        segs.forEachIndexed { i, n ->
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(9.dp)).background(if (seg == i) p.surface else Color.Transparent).clickable { seg = i }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                Text(n, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp, color = if (seg == i) p.ink else p.muted)
+            }
+        }
+    }
+    if (seg == 1) { LogScreen(vm, e, openForm); return }
+    if (seg == 2) Panel(Modifier.rise(1)) {
         var picked by remember { mutableStateOf<Badge?>(null) }
         Row(verticalAlignment = Alignment.Bottom) { Head("Badges", 18, modifier = Modifier.weight(1f)); Small("${g.badges.count { it.got }} of ${g.badges.size} earned") }
         g.badges.chunked(4).forEach { row ->
@@ -171,6 +191,22 @@ fun ProgressScreen(e: Engine, gameOn: Boolean) {
             b.prog != null -> " ${f1(min(b.prog.have, b.prog.need))} of ${if (b.prog.need % 1.0 == 0.0) b.prog.need.toInt().toString() else f1(b.prog.need)} ${b.prog.unit}."
             else -> ""
         })
+    }
+    if (seg == 2) {
+        Panel(Modifier.rise(2)) { LevelBar(g); Small("Easy minutes earn 2 XP each, harder minutes 1. Planned days, tests, completed weeks, quests, lessons and every 15 s gained add more.") }
+        return
+    }
+
+    Panel(Modifier.rise(1)) {
+        Head("Estimated Zone 2 pace, per run", 18)
+        Small("Pace you would hold at ${e.refHr} bpm, worked out from each steady run. Faster is higher. Ringed points are Zone 2 tests.")
+        if (e.eligible.isEmpty()) Body("Your trend appears here once you log a run with average heart rate.", p.muted) else PaceChart(e)
+    }
+
+    Panel(Modifier.rise(2)) {
+        Head("Weekly running time, minutes", 18)
+        Legend(p.easy to "Easy (Zone 1–2)", p.hard to "Zone 3 and above")
+        WeekChart(e)
     }
 
     Panel {
@@ -214,18 +250,6 @@ fun ProgressScreen(e: Engine, gameOn: Boolean) {
             Row(verticalAlignment = Alignment.CenterVertically) { Body(k, modifier = Modifier.weight(1f)); Text(v, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, color = p.ink) }
         }
     }
-
-    Panel {
-        Head("Estimated Zone 2 pace, per run", 18)
-        Small("Pace you would hold at ${e.refHr} bpm, worked out from each steady run. Faster is higher. Ringed points are Zone 2 tests.")
-        if (e.eligible.isEmpty()) Body("Your trend appears here once you log a run with average heart rate.", p.muted) else PaceChart(e)
-    }
-
-    Panel {
-        Head("Weekly running time, minutes", 18)
-        Legend(p.easy to "Easy (Zone 1–2)", p.hard to "Zone 3 and above")
-        WeekChart(e)
-    }
 }
 
 @Composable
@@ -243,6 +267,7 @@ private fun DrawScope.label(text: String, x: Float, y: Float, color: Color, alig
 @Composable
 private fun PaceChart(e: Engine) {
     val p = LocalPal.current
+    val draw = enter(1100, 200)
     Canvas(Modifier.fillMaxWidth().height(230.dp)) {
         val l = 42.dp.toPx(); val r = 14.dp.toPx(); val t = 16.dp.toPx(); val b = 26.dp.toPx()
         val tg = e.s.targetPace.toDouble()
@@ -268,9 +293,12 @@ private fun PaceChart(e: Engine) {
         if (pts.size > 1) {
             val path = Path()
             pts.forEachIndexed { i, (run, est) -> if (i == 0) path.moveTo(x(run.date), y(est)) else path.lineTo(x(run.date), y(est)) }
-            drawPath(path, p.accent, style = Stroke(2.dp.toPx(), join = StrokeJoin.Round))
+            val shown = Path()
+            android.graphics.PathMeasure(path.asAndroidPath(), false).let { it.getSegment(0f, it.length * draw, shown.asAndroidPath(), true) }
+            drawPath(shown, p.accent, style = Stroke(2.dp.toPx(), join = StrokeJoin.Round))
         }
-        for ((run, est) in pts) {
+        pts.forEachIndexed { i, (run, est) ->
+            if ((i + 1f) / pts.size > draw + .001f) return@forEachIndexed
             val c = Offset(x(run.date), y(est))
             if (run.type == "test") { drawCircle(p.surface, 6.dp.toPx(), c); drawCircle(p.accent, 6.dp.toPx(), c, style = Stroke(3.dp.toPx())) }
             else { drawCircle(p.surface, 6.dp.toPx(), c); drawCircle(p.accent, 4.dp.toPx(), c) }
@@ -283,6 +311,7 @@ private fun PaceChart(e: Engine) {
 @Composable
 private fun WeekChart(e: Engine) {
     val p = LocalPal.current
+    val grow = enter(800, 200)
     Canvas(Modifier.fillMaxWidth().height(200.dp)) {
         val l = 36.dp.toPx(); val r = 8.dp.toPx(); val t = 12.dp.toPx(); val b = 26.dp.toPx()
         val base = mondayOf(e.today)
@@ -291,6 +320,7 @@ private fun WeekChart(e: Engine) {
         val step = if (mx > 300) 120 else if (mx > 150) 60 else 30
         val top = ceil(mx / step) * step
         fun y(v: Double) = size.height - b - (v / top).toFloat() * (size.height - t - b)
+        fun yb(v: Double) = size.height - b - (v / top).toFloat() * (size.height - t - b) * grow     // bars rise from the baseline
         val slot = (size.width - l - r) / 8
         val bw = min(28.dp.toPx(), slot - 8.dp.toPx())
         var v = 0.0
@@ -298,7 +328,7 @@ private fun WeekChart(e: Engine) {
         val gap = 2.dp.toPx(); val rad = CornerRadius(4.dp.toPx())
         weeks.forEachIndexed { i, (mon, s) ->
             val cx = l + (i + .5f) * slot - bw / 2
-            val ye = y(s.easy); val yt = y(s.easy + s.hard)
+            val ye = yb(s.easy); val yt = yb(s.easy + s.hard)
             if (s.easy > 0) drawRoundRect(p.easy, Offset(cx, ye), Size(bw, y(0.0) - ye), if (s.hard > 0) CornerRadius.Zero else rad)
             if (s.hard > 0) { val bottom = ye - if (s.easy > 0) gap else 0f; if (bottom > yt) drawRoundRect(p.hard, Offset(cx, yt), Size(bw, bottom - yt), rad) }
             if (i % 2 == 1) label(fmtDay(mon), l + (i + .5f) * slot, size.height - 6.dp.toPx(), p.muted, Paint.Align.CENTER)

@@ -69,4 +69,59 @@ class EngineTest {
         assertEquals(4297, parseDur("1:11:37")); assertEquals(2730, parseDur("45:30")); assertEquals(2700, parseDur("45")); assertEquals(0, parseDur("abc"))
         assertEquals("1:11:37", fmtDur(4297))
     }
+
+    private fun easyWeek(weeksAgo: Long, n: Int = 3) = (0 until n).map {
+        Run("w${weeksAgo}_$it", today.minusWeeks(weeksAgo).plusDays(it * 2L), "easy", 6.0, 2700, 142)
+    }
+
+    @Test fun restPassCoversOneMissedWeek() {
+        val e = Engine(s, easyWeek(3) + easyWeek(1), today)
+        assertEquals(listOf(WeekState.HIT, WeekState.FROZEN, WeekState.HIT, WeekState.OPEN), e.weeks.map { it.state })
+        assertEquals(2, e.game.streak); assertEquals(0, e.game.passes)
+    }
+
+    @Test fun secondMissedWeekBreaksTheStreak() {
+        val e = Engine(s, easyWeek(4) + easyWeek(1), today)
+        assertEquals(listOf(WeekState.HIT, WeekState.FROZEN, WeekState.MISS, WeekState.HIT, WeekState.OPEN), e.weeks.map { it.state })
+        assertEquals(1, e.game.streak)
+    }
+
+    @Test fun weekOffIsNeutralAndKeepsThePass() {
+        val e = Engine(s.copy(breakWeeks = listOf(today.minusWeeks(2))), easyWeek(3) + easyWeek(1), today)
+        assertEquals(WeekState.BREAK, e.weeks[1].state)
+        assertEquals(2, e.game.streak); assertEquals(1, e.game.passes)
+    }
+
+    @Test fun planOnlyAdvancesOnCompletedWeeks() {
+        val e = Engine(s.copy(planStart = today.minusWeeks(3)), easyWeek(3) + easyWeek(1), today)
+        assertEquals(2, e.planIndex(today))          // three weeks passed, two completed
+        assertEquals(3, e.planIndex(today.plusWeeks(1)))
+    }
+
+    @Test fun questsAndCleanSweepBadge() {
+        val e = Engine(s, easyWeek(1), today)
+        assertTrue(e.quests(today.minusWeeks(1)).all { it.done })
+        assertTrue(e.game.badges.first { it.id == "quests" }.got)
+        assertEquals(3, e.game.questsDone)
+    }
+
+    @Test fun zoneSecondsDriveTheEasyShare() {
+        val r = Run("z", today, "easy", 6.0, 3000, 151, zoneSec = listOf(300, 1500, 900, 300, 0))
+        val sp = Engine(s, listOf(r), today).span(today, today.plusDays(1))
+        assertEquals(30.0, sp.easy, .01); assertEquals(20.0, sp.hard, .01)
+    }
+
+    @Test fun reminderNamesTodaysSessionOrStaysQuiet() {
+        val tue = today.plusDays(1)
+        val e = Engine(s.copy(planStart = today), listOf(tenK), tue)
+        assertTrue(e.reminder()!!.first.startsWith("Today: Easy run"))
+        assertNull(Engine(s.copy(planStart = today, breakWeeks = listOf(today)), listOf(tenK), tue).reminder())
+        assertNull(Engine(s.copy(planStart = today), listOf(tenK), today.plusDays(2)).reminder())   // Wednesday: rest day, week still open
+    }
+
+    @Test fun lessonsAreWellFormed() {
+        assertEquals(LESSON_COUNT, LESSONS.size)
+        assertTrue(LESSONS.all { it.answer in it.options.indices && it.cards.size == 3 })
+        assertEquals(LESSONS.size, LESSONS.map { it.id }.toSet().size)
+    }
 }

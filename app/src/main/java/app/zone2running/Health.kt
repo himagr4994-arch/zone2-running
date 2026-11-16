@@ -30,7 +30,7 @@ class Health(private val ctx: Context) {
         available() && client.permissionController.getGrantedPermissions().containsAll(permissions)
 
     /** Runs recorded since [since] by any app that writes to Health Connect (watch apps, Strava, unstrap…). */
-    suspend fun readRuns(since: Instant, typeOf: (durSec: Int, avgHr: Int) -> String): List<Run> {
+    suspend fun readRuns(since: Instant, zoneOf: (Int) -> Int, typeOf: (durSec: Int, avgHr: Int) -> String): List<Run> {
         val out = ArrayList<Run>()
         var token: String? = null
         do {
@@ -51,11 +51,25 @@ class Health(private val ctx: Context) {
                 out += Run(
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
                     distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
-                    notes = sx.title ?: "", source = "health",
+                    notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
                 )
             }
             token = page.pageToken
         } while (token != null)
         return out
+    }
+
+    /** Seconds spent in each zone, from the run's heart-rate samples. Gaps longer than 30 s are not counted. */
+    private suspend fun zoneSeconds(range: TimeRangeFilter, origin: androidx.health.connect.client.records.metadata.DataOrigin, zoneOf: (Int) -> Int): List<Int> {
+        val samples = try {
+            client.readRecords(ReadRecordsRequest(HeartRateRecord::class, range, setOf(origin))).records.flatMap { it.samples }.sortedBy { it.time }
+        } catch (e: Exception) { return emptyList() }
+        if (samples.size < 10) return emptyList()
+        val sec = IntArray(5)
+        for (i in 0 until samples.size - 1) {
+            val dt = Duration.between(samples[i].time, samples[i + 1].time).seconds.coerceIn(0, 30).toInt()
+            sec[zoneOf(samples[i].beatsPerMinute.toInt()) - 1] += dt
+        }
+        return sec.toList()
     }
 }

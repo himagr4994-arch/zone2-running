@@ -6,13 +6,18 @@ Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace do
 
 ## What it does
 
-- **Setup guide.** Enter a target pace, any recent pace with the heart rate you saw at it, and your age or max heart rate. You get your zones, your current Zone 2 pace and a week-by-week plan.
+- **An opening story.** Dil, a small heart, explains in six animated scenes why most running should feel easy and what Zone 2 pace is.
+- **Setup guide.** Enter a target pace, any recent pace with the heart rate you saw at it, and your age or max heart rate. You get your zones, your current Zone 2 pace and a plan, with a note on which answer produced what.
 - **Zone 2 estimate from any run.** A hard 10K still tells you something. Each run's pace is scaled along heart-rate reserve to your Zone 2 reference heart rate.
-- **A plan that builds.** Three weeks grow by about 8%, the fourth eases off and ends with a 30-minute Zone 2 test.
-- **Health Connect import.** Runs recorded by your watch app, Strava, unstrap or anything else that writes to Health Connect arrive with distance, time and heart rate. Read-only.
-- **Coach notes** from your own numbers: too much hard running, a jump in weekly volume, a test that is due.
-- **Levels, streaks and badges** that reward easy minutes twice as much as hard ones. One switch in Setup turns them all off.
+- **A plan that waits for you.** Three steps grow by about 8%, the fourth eases off and ends with a 30-minute Zone 2 test. The plan only moves on after a completed week, and switches easy runs to run-walk when your easy runs keep drifting into Zone 3.
+- **Health Connect import.** Runs recorded by your watch app, Strava, unstrap or anything else that writes to Health Connect arrive with distance, time, heart rate and time in each zone. Read-only.
+- **Eight two-minute lessons**, each ending with one question.
+- **Streaks that forgive.** A week counts at about three-quarters of its runs. Rest passes cover a missed week, and a week marked as time off never breaks the streak.
+- **Weekly quests, levels and badges** that reward easy minutes twice as much as hard ones. One switch in Setup turns the whole game layer off.
+- **A daily reminder** on run days, and a picture of each run to share.
 - **Local backup.** Pick a folder for a daily backup, or export and restore a single JSON file.
+
+The reasoning behind these choices, with sources, is in [docs/research.md](docs/research.md).
 
 ## Install
 

@@ -21,11 +21,13 @@ object Json {
             .put("quality", s.quality).put("onboarded", s.onboarded).put("basePace", s.basePace).put("baseHr", s.baseHr)
             .put("baseDate", s.baseDate?.toString() ?: "").put("gameOn", s.gameOn).put("autoImport", s.autoImport)
             .put("backupTree", s.backupTree).put("lastBackup", s.lastBackup)
+            .put("introSeen", s.introSeen).put("goalWeeks", s.goalWeeks).put("breakWeeks", JSONArray(s.breakWeeks.map { it.toString() }))
+            .put("lessonsDone", JSONArray(s.lessonsDone)).put("remindOn", s.remindOn).put("remindMin", s.remindMin)
         val ra = JSONArray()
         for (r in d.runs) ra.put(
             JSONObject().put("id", r.id).put("date", r.date.toString()).put("type", r.type).put("distKm", r.distKm)
                 .put("durSec", r.durSec).put("avgHr", r.avgHr).put("maxHr", r.maxHr).put("feel", r.feel)
-                .put("notes", r.notes).put("source", r.source)
+                .put("notes", r.notes).put("source", r.source).put("zoneSec", JSONArray(r.zoneSec))
         )
         return JSONObject().put("app", "zone2-running").put("version", 1).put("settings", so).put("runs", ra)
             .put("hidden", JSONArray(d.hidden.toList())).toString(2)
@@ -36,6 +38,7 @@ object Json {
         val so = o.optJSONObject("settings") ?: JSONObject()
         val def = Settings()
         fun ints(a: JSONArray?, fallback: List<Int>) = if (a == null) fallback else (0 until a.length()).map { a.getInt(it) }
+        fun strings(a: JSONArray?) = if (a == null) emptyList() else (0 until a.length()).map { a.getString(it) }
         fun date(v: String) = if (v.isBlank()) null else runCatching { LocalDate.parse(v) }.getOrNull()
         val s = Settings(
             targetPace = so.optInt("targetPace", def.targetPace), maxHr = so.optInt("maxHr", def.maxHr), restHr = so.optInt("restHr", def.restHr),
@@ -47,6 +50,9 @@ object Json {
             basePace = so.optInt("basePace", 0), baseHr = so.optInt("baseHr", 0), baseDate = date(so.optString("baseDate")),
             gameOn = so.optBoolean("gameOn", true), autoImport = so.optBoolean("autoImport", true),
             backupTree = so.optString("backupTree"), lastBackup = so.optString("lastBackup"),
+            introSeen = so.optBoolean("introSeen", so.optBoolean("onboarded", false)), goalWeeks = so.optInt("goalWeeks", 8),
+            breakWeeks = strings(so.optJSONArray("breakWeeks")).mapNotNull { date(it) }, lessonsDone = strings(so.optJSONArray("lessonsDone")),
+            remindOn = so.optBoolean("remindOn", false), remindMin = so.optInt("remindMin", 390),
         )
         val ra = o.optJSONArray("runs") ?: JSONArray()
         val runs = (0 until ra.length()).mapNotNull { i ->
@@ -55,7 +61,7 @@ object Json {
             val km = r.optDouble("distKm", 0.0); val sec = r.optInt("durSec", 0)
             if (km <= 0 || sec <= 0) null
             else Run(r.optString("id", "run_$i"), d, r.optString("type", "easy"), km, sec, r.optInt("avgHr", 0), r.optInt("maxHr", 0),
-                r.optInt("feel", 0), r.optString("notes"), r.optString("source", "manual"))
+                r.optInt("feel", 0), r.optString("notes"), r.optString("source", "manual"), ints(r.optJSONArray("zoneSec"), emptyList()))
         }
         val ha = o.optJSONArray("hidden") ?: JSONArray()
         return AppData(s, runs, (0 until ha.length()).map { ha.getString(it) }.toSet())

@@ -19,6 +19,7 @@ data class Celebration(
     val title: String, val xp: Int, val game: Game, val newBadges: List<Badge>, val records: List<String>,
     val message: String, val summary: String, val estLine: String?, val streakLine: String, val streakOn: Boolean,
     val share: String, val celebrate: Boolean,
+    val run: Run, val zone: Int, val current: Double?, val target: Int, val streakMilestone: Int,
 )
 
 fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebration {
@@ -55,7 +56,8 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
         if (nb.isNotEmpty()) append("\nUnlocked: " + nb.joinToString { it.name })
     }
     return Celebration(title, g.xp - g0.xp, g, nb, recs, msg, summary, after.est(r)?.let { "Zone 2 estimate from this run: ${fmtPace(it)} /km" },
-        streakLine, g.streak > 0, share, up || nb.isNotEmpty() || recs.isNotEmpty())
+        streakLine, g.streak > 0, share, up || nb.isNotEmpty() || recs.isNotEmpty(),
+        r, z, after.current, after.s.targetPace, if (g.streak > g0.streak && g.streak in setOf(4, 8, 12, 26, 52)) g.streak else 0)
 }
 
 class AppVM(app: Application) : AndroidViewModel(app) {
@@ -105,7 +107,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val e = engine()
-                val found = health.readRuns(Instant.now().minus(60, ChronoUnit.DAYS)) { d, h -> e.guessType(d, h) }
+                val found = health.readRuns(Instant.now().minus(60, ChronoUnit.DAYS), e::zoneOf) { d, h -> e.guessType(d, h) }
                 val known = data.runs.map { it.id }.toSet() + data.hidden
                 // Skip anything already typed in by hand: same day, distance within 5%.
                 val fresh = found.filter { n -> n.id !in known && data.runs.none { it.date == n.date && abs(it.distKm - n.distKm) <= n.distKm * .05 } }
@@ -138,6 +140,22 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             commit(data.copy(settings = settings.copy(backupTree = uri.toString(), lastBackup = "")))
             toast = if (settings.lastBackup.isNotEmpty()) "Backup folder set. First backup written." else "Backup folder set"
         } catch (e: Exception) { toast = "Couldn't use that folder" }
+    }
+
+    fun finishLesson(id: String) {
+        if (id !in settings.lessonsDone) { updateSettings { it.copy(lessonsDone = it.lessonsDone + id) }; toast = "Lesson complete · +40 XP" }
+    }
+
+    /** Marks or unmarks a week as time off. Break weeks never break the streak. */
+    fun toggleBreak(mon: LocalDate) = updateSettings { it.copy(breakWeeks = if (mon in it.breakWeeks) it.breakWeeks - mon else it.breakWeeks + mon) }
+
+    fun setReminder(on: Boolean, minutes: Int = settings.remindMin) {
+        updateSettings { it.copy(remindOn = on, remindMin = minutes) }
+        Reminders.schedule(getApplication(), settings)
+    }
+
+    fun shareRun(c: Celebration) {
+        try { ShareCard.share(getApplication(), c) } catch (e: Exception) { toast = "Couldn't open sharing on this phone" }
     }
 
     fun stopBackups() = updateSettings { it.copy(backupTree = "", lastBackup = "") }

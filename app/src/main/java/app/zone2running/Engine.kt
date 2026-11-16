@@ -23,6 +23,7 @@ data class Run(
     val feel: Int = 0,
     val notes: String = "",
     val source: String = "manual",
+    val zoneSec: List<Int> = emptyList(),   // seconds in Zone 1..5, when heart-rate samples were available
 )
 
 data class Settings(
@@ -46,6 +47,12 @@ data class Settings(
     val autoImport: Boolean = true,
     val backupTree: String = "",
     val lastBackup: String = "",
+    val introSeen: Boolean = false,
+    val goalWeeks: Int = 8,                    // the streak the runner committed to in setup
+    val breakWeeks: List<LocalDate> = emptyList(), // Mondays of weeks taken off (sick, travel, life)
+    val lessonsDone: List<String> = emptyList(),
+    val remindOn: Boolean = false,
+    val remindMin: Int = 390,                  // minutes after midnight
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String)
@@ -54,6 +61,10 @@ data class Span(val easy: Double, val hard: Double, val km: Double, val n: Int)
 data class WeekHit(val need: Int, val planned: Int, val n: Int, val hit: Boolean, val s: Span)
 data class Progress(val have: Double, val need: Double, val unit: String)
 data class Badge(val id: String, val glyph: String, val tier: Int, val name: String, val desc: String, val got: Boolean, val prog: Progress? = null)
+enum class WeekState { HIT, MISS, FROZEN, BREAK, OPEN }
+data class WeekRec(val mon: LocalDate, val state: WeekState, val idx: Int, val span: Span)
+data class Quest(val title: String, val have: Int, val need: Int, val xp: Int = 50) { val done get() = have >= need }
+data class Review(val mon: LocalDate, val state: WeekState, val n: Int, val planned: Int, val easyShare: Int?, val km: Double, val line: String)
 data class Note(val tone: String, val text: String)   // tone: warn, good, plain
 data class Trend(val a: Double, val b: Double, val t0: LocalDate)
 data class Challenge(val goal: Int, val done: Int, val daysLeft: Int)
@@ -61,6 +72,7 @@ data class Game(
     val xp: Int, val streak: Int, val best: Int, val weeksHit: Int, val km: Double, val longest: Double,
     val longSec: Int, val z2runs: Int, val tests: Int, val bestEst: Double?, val fast: Double?,
     val bigWeek: Double, val gain: Double, val level: Int, val lo: Int, val hi: Int, val badges: List<Badge>,
+    val passes: Int = 0, val questsDone: Int = 0,
 )
 
 val TYPE_NAMES = linkedMapOf(
@@ -70,6 +82,7 @@ val TYPE_NAMES = linkedMapOf(
 val DOW = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 val MONTHS_FULL = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+const val LESSON_COUNT = 8
 val LEVEL_NAMES = listOf("Starter", "Jogger", "Base Builder", "Steady", "Aerobic", "Engine", "Diesel", "Metronome", "Long Hauler", "Tireless", "Marathon Heart", "Zone 2 Master")
 
 fun levelName(n: Int) = LEVEL_NAMES.getOrElse(n - 1) { "Level $n" }
@@ -126,7 +139,9 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
     fun span(from: LocalDate, to: LocalDate): Span {
         var easy = 0.0; var hard = 0.0; var km = 0.0; var n = 0
         for (r in runs) if (!r.date.isBefore(from) && r.date.isBefore(to)) {
-            n++; km += r.distKm; if (isEasy(r)) easy += r.durSec / 60.0 else hard += r.durSec / 60.0
+            n++; km += r.distKm
+            if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) { easy += (r.zoneSec[0] + r.zoneSec[1]) / 60.0; hard += r.zoneSec.drop(2).sum() / 60.0 }
+            else if (isEasy(r)) easy += r.durSec / 60.0 else hard += r.durSec / 60.0
         }
         return Span(easy, hard, km, n)
     }
@@ -149,9 +164,64 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
 
     val planStart: LocalDate = s.planStart ?: mondayOf(runs.firstOrNull()?.date ?: today)
 
+    private val breakSet = s.breakWeeks.toSet()
+    private val plannedCount = s.days.distinct().size
+    private val weekNeed = max(1, min(max(1, plannedCount), max(2, ceil(plannedCount * .75).toInt())))
+
+    /** True when at least half of the recent easy runs averaged Zone 3 or above. */
+    val driftingHard: Boolean = runs.filter { it.type in setOf("easy", "long") && it.avgHr > 0 && ChronoUnit.DAYS.between(it.date, today) in 0..13 }
+        .let { it.size >= 2 && it.count { r -> zoneOf(r.avgHr) >= 3 } * 2 >= it.size }
+
+    /**
+     * Every week from the first run to now. A missed week is covered by a rest pass when one is left
+     * (one to start, one more per three completed weeks, two at most). Weeks marked as a break are neutral.
+     * The plan only moves forward on completed weeks, so a missed week is repeated, not skipped.
+     */
+    private val weekCalc: Pair<List<WeekRec>, Int> by lazy {
+        val cur = mondayOf(today); val ps = mondayOf(planStart)
+        var m = runs.firstOrNull()?.let { mondayOf(it.date) }?.takeIf { !it.isAfter(cur) } ?: cur
+        var idx = 0; var passes = 1; var hits = 0
+        val out = ArrayList<WeekRec>()
+        while (!m.isAfter(cur)) {
+            val sp = span(m, m.plusDays(7))
+            val st = when {
+                sp.n >= weekNeed -> WeekState.HIT
+                m in breakSet -> WeekState.BREAK
+                m == cur -> WeekState.OPEN
+                passes > 0 -> { passes--; WeekState.FROZEN }
+                else -> WeekState.MISS
+            }
+            out += WeekRec(m, st, idx, sp)
+            if (st == WeekState.HIT) { if (!m.isBefore(ps)) idx++; hits++; if (hits % 3 == 0) passes = min(2, passes + 1) }
+            m = m.plusDays(7)
+        }
+        out to passes
+    }
+    val weeks: List<WeekRec> get() = weekCalc.first
+
+    fun planIndex(mon: LocalDate): Int {
+        val cur = weeks.last()
+        if (mon.isAfter(cur.mon)) return max(0, cur.idx + (ChronoUnit.DAYS.between(cur.mon, mon) / 7).toInt() - if (cur.state == WeekState.BREAK) 1 else 0)
+        return weeks.firstOrNull { it.mon == mon }?.idx ?: 0
+    }
+
+    fun onBreak(mon: LocalDate) = mon in breakSet
+
+    /** Three small goals for the week, each worth XP. */
+    fun quests(mon: LocalDate): List<Quest> {
+        val sp = span(mon, mon.plusDays(7))
+        val easyGoal = max(30, (weekPlan(mon).ses.values.filter { it.type in setOf("easy", "long", "test") }.sumOf { it.min } * .7 / 10).roundToInt() * 10)
+        val inZone = runs.count { !it.date.isBefore(mon) && it.date.isBefore(mon.plusDays(7)) && it.avgHr > 0 && zoneOf(it.avgHr) <= 2 && it.durSec >= 1200 }
+        return listOf(
+            Quest("Run $weekNeed time${if (weekNeed == 1) "" else "s"}", min(sp.n, weekNeed), weekNeed),
+            Quest("$easyGoal easy minutes", min(sp.easy.roundToInt(), easyGoal), easyGoal),
+            Quest("Keep one run in Zone 2", min(inZone, 1), 1),
+        )
+    }
+
     /** The week's sessions. Three weeks build about 8% each, the fourth eases off and re-tests. */
     fun weekPlan(mon: LocalDate): WeekPlan {
-        val wi = max(0, (ChronoUnit.DAYS.between(mondayOf(planStart), mon) / 7).toInt())
+        val wi = planIndex(mon)
         val pos = wi % 4; val block = wi / 4
         val f = min(1.8, 1.12.pow(block)) * listOf(1.0, 1.08, 1.16, .85)[pos]
         val r5 = { x: Double -> max(20, (x / 5).roundToInt() * 5) }
@@ -174,7 +244,8 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
                     Session("tempo", "Tempo 20 min", 40, "10 min easy, 20 min steady in Zone 3 ($z3), 10 min easy."),
                     Session("intervals", "6 × 3 min hard", 50, "10 min easy, 6 × 3 min in Zone 4 ($z4) with 2 min jog between, 10 min easy."),
                 )[wi % 3]
-                else -> Session("easy", "Easy run", easy, "Keep HR $z2. You should be able to speak full sentences.")
+                else -> if (driftingHard) Session("easy", "Easy run-walk", easy, "Jog 4 min, walk 1 min, and keep HR $z2. Your recent easy runs drifted into Zone 3, so this week builds the habit of staying low.")
+                else Session("easy", "Easy run", easy, "Keep HR $z2. You should be able to speak full sentences.")
             }
         }
         return WeekPlan(wi, pos, ses, ses.values.sumOf { it.min }, listOf("Build 1", "Build 2", "Build 3", "Recovery + test")[pos])
@@ -199,10 +270,8 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
 
     /** A week keeps the streak when about three-quarters of its planned runs are done. */
     fun weekHit(mon: LocalDate): WeekHit {
-        val p = weekPlan(mon).ses.size
-        val need = max(2, ceil(p * .75).toInt())
         val sp = span(mon, mon.plusDays(7))
-        return WeekHit(need, p, sp.n, sp.n >= need, sp)
+        return WeekHit(weekNeed, plannedCount, sp.n, sp.n >= weekNeed, sp)
     }
 
     val game: Game by lazy {
@@ -218,20 +287,21 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
             val p = paceOf(r); if (r.distKm >= 3 && (fast == null || p < fast)) fast = p
         }
         val bestEst = eligible.minOfOrNull { it.second }
-        var streak = 0; var best = 0; var weeksHit = 0; var pol = false; var bigWeek = 0.0
-        if (runs.isNotEmpty()) {
-            val cur = mondayOf(today); var m = mondayOf(runs.first().date); var run = 0
-            while (!m.isAfter(cur)) {
-                val w = weekHit(m); val tot = w.s.easy + w.s.hard
-                bigWeek = max(bigWeek, w.s.km)
-                if (w.s.n >= 3 && tot > 0 && w.s.easy / tot >= .8) pol = true
-                if (w.hit) { run++; weeksHit++; xp += 100; best = max(best, run) } else if (m.isBefore(cur)) run = 0
-                m = m.plusDays(7)
+        var streak = 0; var best = 0; var weeksHit = 0; var pol = false; var bigWeek = 0.0; var questsDone = 0; var fullQuestWeek = false
+        if (runs.isNotEmpty()) for (w in weeks) {
+            val tot = w.span.easy + w.span.hard
+            bigWeek = max(bigWeek, w.span.km)
+            if (w.span.n >= 3 && tot > 0 && w.span.easy / tot >= .8) pol = true
+            val q = quests(w.mon).count { it.done }; questsDone += q; xp += q * 50; if (q == 3) fullQuestWeek = true
+            when (w.state) {
+                WeekState.HIT -> { streak++; weeksHit++; xp += 100; best = max(best, streak) }
+                WeekState.MISS -> streak = 0
+                else -> Unit                      // a rest pass, a break or the week in progress leaves the streak alone
             }
-            streak = run
         }
+        xp += s.lessonsDone.distinct().size * 40
         val c = current; val b0 = baseline
-        val gain = if (b0 != null && c != null) max(0.0, b0 - c) else 0.0
+        val gain = if (b0 != null && c != null && eligible.size >= 3) max(0.0, b0 - c) else 0.0   // two points are noise, not progress
         xp += floor(gain / 15).toInt() * 150
         var lv = 1; while (150 * (lv + 1) * lv <= xp) lv++
         val badges = listOf(
@@ -253,15 +323,18 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
             Badge("r4", "−60s", 3, "Minute faster", "Zone 2 pace 60 s/km faster than where you started.", gain >= 60, Progress(gain, 60.0, "s")),
             Badge("k500", "500", 3, "Five hundred", "Log 500 km in total.", km >= 500, Progress(km, 500.0, "km")),
             Badge("s12", "12W", 3, "Unbreakable", "Keep a 12-week streak.", best >= 12, Progress(best.toDouble(), 12.0, "weeks")),
+            Badge("quests", "3/3", 2, "Clean sweep", "Finish all three weekly quests in one week.", fullQuestWeek),
+            Badge("learn", "A+", 2, "Student", "Finish every lesson.", s.lessonsDone.distinct().size >= LESSON_COUNT, Progress(s.lessonsDone.distinct().size.toDouble(), LESSON_COUNT.toDouble(), "lessons")),
             Badge("goal", fmtPace(s.targetPace.toDouble()), 3, "Arrived", "Hold your target pace at Zone 2 heart rate.", c != null && c <= s.targetPace),
         )
-        Game(xp, streak, best, weeksHit, km, longest, longSec, z2, tests, bestEst, fast, bigWeek, gain, lv, 150 * lv * (lv - 1), 150 * (lv + 1) * lv, badges)
+        Game(xp, streak, best, weeksHit, km, longest, longSec, z2, tests, bestEst, fast, bigWeek, gain, lv, 150 * lv * (lv - 1), 150 * (lv + 1) * lv, badges, weekCalc.second, questsDone)
     }
 
     /** Up to three notes drawn from the runner's own numbers. */
     fun coach(): List<Note> {
         if (runs.isEmpty()) return listOf(Note("plain", "Log your first run to get coaching notes based on your own numbers."))
         val out = ArrayList<Note>()
+        weeks.dropLast(1).lastOrNull()?.let { if (it.state == WeekState.FROZEN || it.state == WeekState.MISS) out += Note("plain", if (it.state == WeekState.FROZEN) "Last week fell short, so a rest pass kept your streak. This week repeats the same step of the plan instead of building." else "Last week fell short, so this week repeats the same step of the plan. Hit it and the plan moves on.") }
         val two = span(today.minusDays(13), today.plusDays(1)); val tot = two.easy + two.hard
         if (tot > 0 && two.n >= 2 && two.easy / tot < .7)
             out += Note("warn", "${(two.hard / tot * 100).roundToInt()}% of your last two weeks was Zone 3 or harder. Aim for about 80% easy: slow down until HR stays under ${zb[2]} bpm, even if that means walk breaks.")
@@ -297,6 +370,54 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
         val goal = max(60, (weekPlan(mondayOf(today)).total * .8 * ChronoUnit.DAYS.between(from, m1) / 7 / 10).roundToInt() * 10)
         val done = runs.filter { !it.date.isBefore(m0) && it.date.isBefore(m1) && isEasy(it) }.sumOf { it.durSec / 60.0 }.roundToInt()
         return Challenge(goal, done, ChronoUnit.DAYS.between(today, m1).toInt())
+    }
+
+    /** How the heart mascot feels about the current state of training. */
+    fun mood(): String {
+        val last = runs.lastOrNull() ?: return "hello"
+        val since = ChronoUnit.DAYS.between(last.date, today)
+        return when {
+            onBreak(mondayOf(today)) -> "sleepy"
+            since >= 5 -> "sleepy"
+            since <= 1 && last.avgHr > 0 && zoneOf(last.avgHr) >= 4 -> "puffed"
+            weeks.last().state == WeekState.HIT -> "proud"
+            else -> "calm"
+        }
+    }
+
+    fun moodLine(): String = when (mood()) {
+        "hello" -> "Hi, I'm Dil, your heart. Log a run and I'll tell you how we're doing."
+        "sleepy" -> if (onBreak(mondayOf(today))) "Taking the week off. I'll be here when you're back. Your streak is safe." else "It's been a few days. A short easy one would wake me up nicely."
+        "puffed" -> "Phew. That last one had me working. Let's keep the next run gentle."
+        "proud" -> "Weekly goal done. This is exactly the kind of week that makes me stronger."
+        else -> "Nice and steady. Keep me in Zone 2 and I'll keep getting stronger."
+    }
+
+    /** A short look back at the week that just ended; null when there is nothing to say. */
+    fun review(): Review? {
+        val w = weeks.dropLast(1).lastOrNull() ?: return null
+        val tot = w.span.easy + w.span.hard
+        val share = if (tot > 0) (w.span.easy / tot * 100).roundToInt() else null
+        val line = when (w.state) {
+            WeekState.HIT -> if (share != null && share >= 75) "Goal hit and mostly easy. Textbook week." else "Goal hit. Next step: more of those minutes in Zone 2."
+            WeekState.BREAK -> "A week off. Rest counts too."
+            WeekState.FROZEN -> "Short of the goal. A rest pass covered it, and the plan waits for you."
+            else -> "Short of the goal and no rest pass left, so the streak restarts. One run gets it going again."
+        }
+        return Review(w.mon, w.state, w.span.n, plannedCount, share, w.span.km, line)
+    }
+
+    /** What the daily reminder should say, or null when there is nothing worth a notification. */
+    fun reminder(): Pair<String, String>? {
+        val mon = mondayOf(today)
+        if (onBreak(mon)) return null
+        val ses = weekPlan(mon).ses[today.dayOfWeek.value]
+        if (ses != null && runsOn(today).isEmpty()) return "Today: ${ses.title} · ${ses.min} min" to ses.detail.substringBefore(". ") + "."
+        val w = weekHit(mon); val left = w.need - w.n; val daysLeft = 8 - today.dayOfWeek.value
+        val g = game
+        if (left > 0 && left >= daysLeft && runsOn(today).isEmpty())
+            return (if (g.streak > 0) "Your ${g.streak}-week streak is on the line" else "This week's goal is still open") to "$left more run${if (left == 1) "" else "s"} this week does it. An easy 20 minutes counts."
+        return null
     }
 
     /** Best guess at a run's type from its heart rate, for runs imported without a label. */

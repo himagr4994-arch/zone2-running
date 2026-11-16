@@ -8,6 +8,7 @@ Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace do
 
 - **An opening story.** Dil, a small heart, explains in six animated scenes why most running should feel easy and what Zone 2 pace is.
 - **A home screen that follows your day.** It leads with one thing: the session in the morning, a nudge in the evening, the run itself once it is done, a shorter option when it gets late, tomorrow's plan on a rest day.
+- **It learns your routine and asks first.** After a few timed runs it knows when you usually run, shifts the home screen to match, and offers to move the reminder or a plan day. Nothing changes without a yes, and all of it is worked out on the phone.
 - **Setup guide.** Enter a target pace, any recent pace with the heart rate you saw at it, and your age or max heart rate. You get your zones, your current Zone 2 pace and a plan, with a note on which answer produced what.
 - **Zone 2 estimate from any run.** A hard 10K still tells you something. Each run's pace is scaled along heart-rate reserve to your Zone 2 reference heart rate.
 - **A plan that waits for you.** Three steps grow by about 8%, the fourth eases off and ends with a 30-minute Zone 2 test. The plan only moves on after a completed week, and switches easy runs to run-walk when your easy runs keep drifting into Zone 3.

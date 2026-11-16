@@ -165,7 +165,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
         }
-        Small("Zone 2 Running 0.3.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("Zone 2 Running 0.4.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
     }
 }
 
@@ -185,6 +185,7 @@ fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) 
                 Pick(label, minutes == m, Modifier.weight(1f)) { onChange(true, m) }
             }
         }
+        if (minutes !in listOf(360, 390, 420, 1080, 1140, 1200)) Small("Set for ${fmtClock(minutes)}, an hour before you usually run.", LocalPal.current.ink)
         NoteBox(Note("plain", "Preview: “Today: Easy run · 40 min. Keep HR in Zone 2.”"))
     }
     if (denied) Small("Notifications are blocked for this app. You can allow them in Android settings.")

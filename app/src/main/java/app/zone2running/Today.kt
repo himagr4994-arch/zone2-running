@@ -54,6 +54,23 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
         }
     }
 
+    // 2. One thing Dil noticed in your habits, offered and never applied without a yes.
+    e.suggestions().firstOrNull()?.let { sg ->
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.accept(sg) else vm.snooze(sg) }
+        Panel(Modifier.rise(k++)) {
+            Label("Dil noticed")
+            Head(sg.title, 20)
+            Body(sg.body)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Btn(sg.yes, small = true) {
+                    if (sg.act is Remind && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else vm.accept(sg)
+                }
+                Btn("Not now", ghost = true, small = true) { vm.snooze(sg) }
+            }
+        }
+    }
+
     val mon = mondayOf(e.today)
     val heroCard: @Composable () -> Unit = { Box(Modifier.rise(k++)) { Hero(e) } }
     val weekCard: @Composable () -> Unit = { WeekCard(e, game, Modifier.rise(k++)) }

@@ -87,13 +87,14 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
     var maxHr by remember { mutableStateOf(r0?.maxHr?.takeIf { it > 0 }?.toString() ?: "") }
     var feel by remember { mutableIntStateOf(r0?.feel ?: 0) }
     var notes by remember { mutableStateOf(r0?.notes ?: "") }
+    var startMin by remember { mutableIntStateOf(r0?.startMin ?: -1) }
     var picking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf(false) }
 
     fun draft() = Run(r0?.id ?: "run_${date.toString().replace("-", "")}_${System.currentTimeMillis().toString(36)}", date, type,
         ((dist.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).roundToInt() / 100.0, parseDur(time), hr.toIntOrNull() ?: 0, maxHr.toIntOrNull() ?: 0,
-        feel, notes.trim().take(500), r0?.source ?: "manual")
+        feel, notes.trim().take(500), r0?.source ?: "manual", r0?.zoneSec ?: emptyList(), startMin)
 
     Panel {
         Head(if (r0 == null) "Log a run" else "Edit run")
@@ -119,6 +120,12 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Field("Average HR", hr, Modifier.weight(1f), "142") { hr = it }
             Field("Highest HR", maxHr, Modifier.weight(1f), "optional") { maxHr = it }
+        }
+        if (r0?.source != "health") {
+            Small("When did you run? Optional. It teaches the app your routine.")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Early" to 360, "Morning" to 510, "Midday" to 780, "Evening" to 1110, "Night" to 1260).forEach { (n, m) -> Pick(n, startMin == m, Modifier.weight(1f)) { startMin = if (startMin == m) -1 else m } }
+            }
         }
         Small("How it felt: 1 very easy, 3 steady, 5 all out")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

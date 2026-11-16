@@ -25,6 +25,7 @@ data class Run(
     val notes: String = "",
     val source: String = "manual",
     val zoneSec: List<Int> = emptyList(),   // seconds in Zone 1..5, when heart-rate samples were available
+    val startMin: Int = -1,                 // start time as minutes after midnight; -1 when unknown
 )
 
 data class Settings(
@@ -54,6 +55,7 @@ data class Settings(
     val lessonsDone: List<String> = emptyList(),
     val remindOn: Boolean = false,
     val remindMin: Int = 390,                  // minutes after midnight
+    val snoozed: Map<String, LocalDate> = emptyMap(), // suggestions the runner said "not now" to, and when
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String)
@@ -69,6 +71,11 @@ data class Review(val mon: LocalDate, val state: WeekState, val n: Int, val plan
 /** The one thing the home screen leads with right now. */
 data class Lead(val kind: String, val mood: String, val eyebrow: String, val title: String, val body: String,
                 val session: Session? = null, val date: LocalDate? = null, val run: Run? = null, val cta: String = "")
+/** Something the app noticed in the runner's habits. It is only ever offered, never applied silently. */
+sealed interface Act
+data class MoveDay(val from: Int, val to: Int) : Act
+data class Remind(val min: Int) : Act
+data class Suggestion(val key: String, val title: String, val body: String, val yes: String, val act: Act)
 data class PaceChange(val delta: Double, val since: String)          // positive delta = faster
 data class Confidence(val level: Int, val label: String, val why: String)   // 0 rough, 1 fair, 2 solid
 data class Note(val tone: String, val text: String)   // tone: warn, good, plain
@@ -101,6 +108,12 @@ fun fmtDur(sec: Int): String {
 fun parseDur(t: String): Int {
     val p = t.trim().split(":").map { it.trim().toIntOrNull() ?: return 0 }
     return when (p.size) { 3 -> p[0] * 3600 + p[1] * 60 + p[2]; 2 -> p[0] * 60 + p[1]; 1 -> p[0] * 60; else -> 0 }
+}
+val DAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+/** 1110 → "6:30 pm". */
+fun fmtClock(min: Int): String {
+    val h = min / 60 % 24; val m = min % 60
+    return "${if (h % 12 == 0) 12 else h % 12}${if (m > 0) ":" + m.toString().padStart(2, '0') else ""} ${if (h < 12) "am" else "pm"}"
 }
 fun f1(x: Double) = String.format(Locale.US, "%.1f", x)
 fun f2(x: Double) = String.format(Locale.US, "%.2f", x)
@@ -383,8 +396,18 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
      * Order matters: a finished run beats everything, a streak at risk beats the ordinary plan.
      */
     fun lead(t: LocalTime): Lead {
-        val mon = mondayOf(today); val h = t.hour
-        val part = when { h < 5 -> "night"; h < 11 -> "morning"; h < 16 -> "midday"; h < 21 -> "evening"; else -> "night" }
+        val mon = mondayOf(today); val h = t.hour; val nowMin = h * 60 + t.minute
+        val u = usualRunMin
+        // With a learned run time, "ready" is the two hours before it and the hour after; otherwise it is the evening.
+        val part = when {
+            h >= 21 || h < 4 -> "night"
+            u != null && nowMin in (u - 120)..(u + 60) -> "ready"
+            u != null && nowMin > u + 60 -> "after"
+            u != null -> if (h < 11) "morning" else "midday"
+            h < 11 -> "morning"; h < 16 -> "midday"; else -> "ready"
+        }
+        val evening = h >= 16 || h < 4
+        val habit = u?.let { "You usually run around ${fmtClock(it)}. " } ?: ""
         val ses = weekPlan(mon).ses[today.dayOfWeek.value]
         val next = today.plusDays(1); val tomorrow = weekPlan(mondayOf(next)).ses[next.dayOfWeek.value]
         val tomorrowLine = tomorrow?.let { "Tomorrow: ${it.title}, ${it.min} min." } ?: "Tomorrow is a rest day."
@@ -397,7 +420,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
                 val z = if (ran.avgHr > 0) zoneOf(ran.avgHr) else 0
                 val easyType = ran.type in setOf("easy", "long", "test")
                 val title = when { easyType && z in 1..2 -> "Kept it easy. That's the work."; easyType && z >= 3 -> "Done. A little hot for an easy day."; ran.type == "test" -> "Benchmark recorded."; else -> "Hard session banked." }
-                val body = (if (easyType && z >= 3) "Next easy run, slow down or walk until you stay under ${zb[2]} bpm. " else "") + (if (part == "evening" || part == "night") tomorrowLine else "Nothing more to do today.")
+                val body = (if (easyType && z >= 3) "Next easy run, slow down or walk until you stay under ${zb[2]} bpm. " else "") + (if (evening) tomorrowLine else "Nothing more to do today.")
                 Lead("done", if (z in 1..2) "proud" else if (z >= 4) "puffed" else "calm", "Today's run", title, body, run = ran)
             }
             onBreak(mon) -> Lead("break", "sleepy", "Week off", "Rest up. I'll be here.", "Your streak is safe and the plan picks up where you left it.")
@@ -406,15 +429,43 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
                 "$left more run${if (left == 1) "" else "s"} with $daysLeft day${if (daysLeft == 1) "" else "s"} left. An easy 20 minutes counts.", ses, today, cta = "Log a run")
             ses != null && part == "night" -> Lead("late", "sleepy", "Getting late", "Short on time? 20 easy minutes still counts.",
                 "A short run keeps the habit alive. Or sleep on it: you need $left more run${if (left == 1) "" else "s"} this week and have ${daysLeft - 1} day${if (daysLeft - 1 == 1) "" else "s"} after today.", ses, today, cta = "Log a short run")
-            ses != null -> Lead("plan", "calm", when (part) { "morning" -> "Today's run"; "midday" -> "Later today"; else -> "Ready when you are" },
-                "${ses.title} · ${ses.min} min", ses.detail, ses, today, cta = "Log this run")
+            ses != null -> Lead("plan", "calm", when (part) { "morning" -> "Today's run"; "midday" -> "Later today"; "after" -> "Later than usual"; else -> "Ready when you are" },
+                "${ses.title} · ${ses.min} min", when (part) { "ready" -> habit; "after" -> habit + "Any time today still counts. "; else -> "" } + ses.detail, ses, today, cta = "Log this run")
             today.dayOfWeek.value == 1 && h < 12 && review() != null -> review()!!.let {
                 Lead("review", if (it.state == WeekState.HIT) "proud" else "calm", "Last week", "${it.n} of ${it.planned} runs · ${f1(it.km)} km", it.line + " " + (if (tomorrow != null) tomorrowLine else ""))
             }
-            part == "evening" || part == "night" -> Lead("rest", "calm", "Rest day", tomorrow?.let { "Tomorrow: ${it.title} · ${it.min} min" } ?: "Two rest days in a row. Enjoy them.",
+            evening -> Lead("rest", "calm", "Rest day", tomorrow?.let { "Tomorrow: ${it.title} · ${it.min} min" } ?: "Two rest days in a row. Enjoy them.",
                 "Nothing to do tonight. Sleep is training too.")
             else -> Lead("rest", "sleepy", "Rest day", "No run today. I'm recovering.", "Rest is when the training sinks in. A short strength session or a two-minute lesson is plenty.")
         }
+    }
+
+    /**
+     * When this runner usually starts, learned from the last eight weeks. Needs three timed runs,
+     * and most of them within 90 minutes of each other, before it says anything.
+     */
+    val usualRunMin: Int? = runs.filter { it.startMin >= 0 && ChronoUnit.DAYS.between(it.date, today) in 0..56 }.map { it.startMin }
+        .takeIf { it.size >= 3 }?.let { all -> val med = all.sorted()[all.size / 2]; if (all.count { abs(it - med) <= 90 } * 10 >= all.size * 6) med / 15 * 15 else null }
+
+    /** Changes worth offering: a plan day that matches where the runs actually happen, and a reminder timed to them. */
+    fun suggestions(): List<Suggestion> {
+        val out = ArrayList<Suggestion>()
+        fun live(key: String) = s.snoozed[key]?.let { ChronoUnit.DAYS.between(it, today) < 28 } != true
+        val recent = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 1..28 }
+        fun weeksRunOn(d: Int) = recent.filter { it.date.dayOfWeek.value == d }.map { mondayOf(it.date) }.distinct().size
+        val planDays = s.days.distinct()
+        if (ChronoUnit.DAYS.between(planStart, today) >= 21) {
+            val to = (1..7).filter { it !in planDays && weeksRunOn(it) >= 3 }.maxByOrNull { weeksRunOn(it) }
+            val from = planDays.filter { weeksRunOn(it) == 0 }.minByOrNull { d -> to?.let { abs(d - it).let { g -> min(g, 7 - g) } } ?: 0 }
+            if (to != null && from != null && live("days:$from>$to")) out += Suggestion("days:$from>$to", "Move ${DAY_NAMES[from - 1]}'s run to ${DAY_NAMES[to - 1]}?",
+                "You've run on ${DAY_NAMES[to - 1]} in ${weeksRunOn(to)} of the last 4 weeks and not once on ${DAY_NAMES[from - 1]}. The plan can match what you actually do.", "Move it", MoveDay(from, to))
+        }
+        usualRunMin?.let { u ->
+            val want = max(0, u - 60)
+            if (!s.remindOn) { if (live("remind:on")) out += Suggestion("remind:on", "Want a nudge at ${fmtClock(want)}?", "You usually run around ${fmtClock(u)}. One reminder an hour before, only on days with something to say.", "Remind me", Remind(want)) }
+            else if (abs(s.remindMin - want) >= 45 && live("remind:$want")) out += Suggestion("remind:$want", "Move your reminder to ${fmtClock(want)}?", "It's set for ${fmtClock(s.remindMin)}, but you usually run around ${fmtClock(u)}.", "Move it", Remind(want))
+        }
+        return out
     }
 
     /** How Zone 2 pace has moved: against four weeks ago when there is history, otherwise against the start. */

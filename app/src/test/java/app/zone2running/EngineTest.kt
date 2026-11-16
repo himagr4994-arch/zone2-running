@@ -154,4 +154,46 @@ class EngineTest {
         assertEquals("4 weeks ago", e.paceChange()!!.since); assertTrue(e.paceChange()!!.delta > 10)
         assertEquals(2, e.confidence()!!.level)
     }
+
+    /** Four weeks of runs on Mon / Thu / Sat at about 7 pm, against a plan of Tue / Thu / Sat / Sun. */
+    private fun mondayRunner(): List<Run> = (1L..4L).flatMap { w ->
+        listOf(0L to 1140, 3L to 1155, 5L to 1125).map { (d, start) -> Run("h$w$d", today.minusWeeks(w).plusDays(d), "easy", 6.0, 2700, 142, startMin = start) }
+    }
+
+    @Test fun learnsTheUsualRunTime() {
+        assertNull(Engine(s, listOf(tenK), today).usualRunMin)                       // no timed runs yet
+        val e = Engine(s, mondayRunner(), today)
+        assertEquals(1140, e.usualRunMin)                                           // 7:00 pm
+        val scattered = listOf(360, 780, 1260, 540).mapIndexed { i, m -> Run("s$i", today.minusDays(i + 1L), "easy", 5.0, 2400, 142, startMin = m) }
+        assertNull(Engine(s, scattered, today).usualRunMin)                         // no routine to learn from
+    }
+
+    @Test fun readyWindowFollowsTheLearnedTime() {
+        val early = (1L..4L).map { Run("e$it", today.minusDays(it * 2), "easy", 5.0, 2400, 142, startMin = 375) }   // 6:15 am
+        val plan = s.copy(planStart = today.minusWeeks(2), days = (1..7).toList())
+        val e = Engine(plan, early, today)
+        assertEquals("Ready when you are", e.lead(java.time.LocalTime.of(5, 30)).eyebrow)
+        assertEquals("Later than usual", e.lead(java.time.LocalTime.of(9, 0)).eyebrow)
+        assertTrue(e.lead(java.time.LocalTime.of(5, 30)).body.startsWith("You usually run around 6:15 am."))
+    }
+
+    @Test fun offersToMoveThePlanToTheDaysActuallyRun() {
+        val plan = s.copy(planStart = today.minusWeeks(5), remindOn = true, remindMin = 1080)
+        val sg = Engine(plan, mondayRunner(), today).suggestions()
+        assertEquals(1, sg.size)
+        assertEquals(MoveDay(2, 1), sg[0].act)                                      // Tuesday never run, Monday always
+        assertEquals("Move Tuesday's run to Monday?", sg[0].title)
+        // Said "not now" last week: it stays away.
+        assertTrue(Engine(plan.copy(snoozed = mapOf(sg[0].key to today.minusDays(7))), mondayRunner(), today).suggestions().isEmpty())
+        // A plan younger than three weeks is left alone.
+        assertTrue(Engine(plan.copy(planStart = today.minusWeeks(1)), mondayRunner(), today).suggestions().isEmpty())
+    }
+
+    @Test fun offersAReminderAnHourBeforeTheUsualTime() {
+        val base = s.copy(planStart = today.minusWeeks(5), days = listOf(1, 4, 6))
+        assertEquals(Remind(1080), Engine(base, mondayRunner(), today).suggestions().single().act)
+        assertEquals("Move your reminder to 6 pm?", Engine(base.copy(remindOn = true, remindMin = 390), mondayRunner(), today).suggestions().single().title)
+        assertTrue(Engine(base.copy(remindOn = true, remindMin = 1080), mondayRunner(), today).suggestions().isEmpty())
+        assertEquals("6:30 am", fmtClock(390)); assertEquals("12 pm", fmtClock(720)); assertEquals("12:15 am", fmtClock(15))
+    }
 }

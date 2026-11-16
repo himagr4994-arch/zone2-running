@@ -98,6 +98,21 @@ class ScreensTest {
         rule.onNodeWithText("Kept it easy. That's the work.").assertExists(); shot("moment-done")
     }
 
+    @Test @Config(qualifiers = "w400dp-h1100dp-xhdpi") fun suggestionIsOfferedAndApplied() {
+        val vm = AppVM(ApplicationProvider.getApplicationContext())
+        vm.updateSettings { it.copy(introSeen = true, onboarded = true, maxHr = 188, planStart = mondayOf(today).minusWeeks(5), remindOn = true, remindMin = 1080) }
+        val mon = mondayOf(today)
+        for (w in 1L..4L) for ((d, start) in listOf(0L to 1140, 3L to 1155, 5L to 1125))
+            vm.saveRun(Run("h$w$d", mon.minusWeeks(w).plusDays(d), "easy", 6.0, 2700, 142, startMin = start), isNew = false)
+        vm.toast = null; vm.clock = java.time.LocalTime.of(18, 0)
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Move Tuesday's run to Monday?").assertExists(); shot("suggestion")
+        rule.onNodeWithText("Move it").performClick(); rule.waitForIdle()
+        assertEquals(listOf(1, 4, 6, 7), vm.settings.days)
+        rule.onNodeWithText("Move Tuesday's run to Monday?").assertDoesNotExist()
+        shot("suggestion-applied")
+    }
+
     @Test fun lessonEarnsXp() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }

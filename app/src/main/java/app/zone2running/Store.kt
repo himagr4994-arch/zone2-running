@@ -23,11 +23,12 @@ object Json {
             .put("backupTree", s.backupTree).put("lastBackup", s.lastBackup)
             .put("introSeen", s.introSeen).put("goalWeeks", s.goalWeeks).put("breakWeeks", JSONArray(s.breakWeeks.map { it.toString() }))
             .put("lessonsDone", JSONArray(s.lessonsDone)).put("remindOn", s.remindOn).put("remindMin", s.remindMin)
+            .put("snoozed", JSONObject().also { o -> s.snoozed.forEach { (k, v) -> o.put(k, v.toString()) } })
         val ra = JSONArray()
         for (r in d.runs) ra.put(
             JSONObject().put("id", r.id).put("date", r.date.toString()).put("type", r.type).put("distKm", r.distKm)
                 .put("durSec", r.durSec).put("avgHr", r.avgHr).put("maxHr", r.maxHr).put("feel", r.feel)
-                .put("notes", r.notes).put("source", r.source).put("zoneSec", JSONArray(r.zoneSec))
+                .put("notes", r.notes).put("source", r.source).put("zoneSec", JSONArray(r.zoneSec)).put("startMin", r.startMin)
         )
         return JSONObject().put("app", "zone2-running").put("version", 1).put("settings", so).put("runs", ra)
             .put("hidden", JSONArray(d.hidden.toList())).toString(2)
@@ -53,6 +54,7 @@ object Json {
             introSeen = so.optBoolean("introSeen", so.optBoolean("onboarded", false)), goalWeeks = so.optInt("goalWeeks", 8),
             breakWeeks = strings(so.optJSONArray("breakWeeks")).mapNotNull { date(it) }, lessonsDone = strings(so.optJSONArray("lessonsDone")),
             remindOn = so.optBoolean("remindOn", false), remindMin = so.optInt("remindMin", 390),
+            snoozed = so.optJSONObject("snoozed")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(o.optString(k))?.let { k to it } }.toMap() } ?: emptyMap(),
         )
         val ra = o.optJSONArray("runs") ?: JSONArray()
         val runs = (0 until ra.length()).mapNotNull { i ->
@@ -61,7 +63,7 @@ object Json {
             val km = r.optDouble("distKm", 0.0); val sec = r.optInt("durSec", 0)
             if (km <= 0 || sec <= 0) null
             else Run(r.optString("id", "run_$i"), d, r.optString("type", "easy"), km, sec, r.optInt("avgHr", 0), r.optInt("maxHr", 0),
-                r.optInt("feel", 0), r.optString("notes"), r.optString("source", "manual"), ints(r.optJSONArray("zoneSec"), emptyList()))
+                r.optInt("feel", 0), r.optString("notes"), r.optString("source", "manual"), ints(r.optJSONArray("zoneSec"), emptyList()), r.optInt("startMin", -1))
         }
         val ha = o.optJSONArray("hidden") ?: JSONArray()
         return AppData(s, runs, (0 until ha.length()).map { ha.getString(it) }.toSet())

@@ -161,5 +161,16 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         try { ShareCard.share(getApplication(), c) } catch (e: Exception) { toast = "Couldn't open sharing on this phone" }
     }
 
+    /** Applies a suggestion the runner agreed to. */
+    fun accept(sg: Suggestion) {
+        when (val a = sg.act) {
+            is MoveDay -> { updateSettings { it.copy(days = (it.days - a.from + a.to).distinct().sorted(), longDay = if (it.longDay == a.from) a.to else it.longDay) }; toast = "Plan updated" }
+            is Remind -> { setReminder(true, a.min); toast = "Reminder set for ${fmtClock(a.min)}" }
+        }
+    }
+
+    /** "Not now": the same suggestion stays away for four weeks. */
+    fun snooze(sg: Suggestion) = updateSettings { it.copy(snoozed = it.snoozed + (sg.key to LocalDate.now())) }
+
     fun stopBackups() = updateSettings { it.copy(backupTree = "", lastBackup = "") }
 }

@@ -52,6 +52,7 @@ class Health(private val ctx: Context) {
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
                     distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
                     notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
+                    startMin = sx.startTime.atOffset(offset).toLocalTime().let { it.hour * 60 + it.minute },
                 )
             }
             token = page.pageToken

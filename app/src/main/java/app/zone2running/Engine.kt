@@ -1,6 +1,7 @@
 package app.zone2running
 
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.abs
@@ -65,6 +66,11 @@ enum class WeekState { HIT, MISS, FROZEN, BREAK, OPEN }
 data class WeekRec(val mon: LocalDate, val state: WeekState, val idx: Int, val span: Span)
 data class Quest(val title: String, val have: Int, val need: Int, val xp: Int = 50) { val done get() = have >= need }
 data class Review(val mon: LocalDate, val state: WeekState, val n: Int, val planned: Int, val easyShare: Int?, val km: Double, val line: String)
+/** The one thing the home screen leads with right now. */
+data class Lead(val kind: String, val mood: String, val eyebrow: String, val title: String, val body: String,
+                val session: Session? = null, val date: LocalDate? = null, val run: Run? = null, val cta: String = "")
+data class PaceChange(val delta: Double, val since: String)          // positive delta = faster
+data class Confidence(val level: Int, val label: String, val why: String)   // 0 rough, 1 fair, 2 solid
 data class Note(val tone: String, val text: String)   // tone: warn, good, plain
 data class Trend(val a: Double, val b: Double, val t0: LocalDate)
 data class Challenge(val goal: Int, val done: Int, val daysLeft: Int)
@@ -371,6 +377,71 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate) {
         val done = runs.filter { !it.date.isBefore(m0) && it.date.isBefore(m1) && isEasy(it) }.sumOf { it.durSec / 60.0 }.roundToInt()
         return Challenge(goal, done, ChronoUnit.DAYS.between(today, m1).toInt())
     }
+
+    /**
+     * Picks what the home screen should lead with, from the time of day and what has already happened today.
+     * Order matters: a finished run beats everything, a streak at risk beats the ordinary plan.
+     */
+    fun lead(t: LocalTime): Lead {
+        val mon = mondayOf(today); val h = t.hour
+        val part = when { h < 5 -> "night"; h < 11 -> "morning"; h < 16 -> "midday"; h < 21 -> "evening"; else -> "night" }
+        val ses = weekPlan(mon).ses[today.dayOfWeek.value]
+        val next = today.plusDays(1); val tomorrow = weekPlan(mondayOf(next)).ses[next.dayOfWeek.value]
+        val tomorrowLine = tomorrow?.let { "Tomorrow: ${it.title}, ${it.min} min." } ?: "Tomorrow is a rest day."
+        val w = weekHit(mon); val left = w.need - w.n; val daysLeft = 8 - today.dayOfWeek.value
+        val ran = runsOn(today).lastOrNull()
+        return when {
+            runs.isEmpty() -> Lead("first", "hello", "Your first run", "20 easy minutes is all it takes",
+                "Go slower than feels right, keep your heart rate under ${zb[2]} bpm, and log it. That one run gives me your starting line.", date = today, cta = "Log my first run")
+            ran != null -> {
+                val z = if (ran.avgHr > 0) zoneOf(ran.avgHr) else 0
+                val easyType = ran.type in setOf("easy", "long", "test")
+                val title = when { easyType && z in 1..2 -> "Kept it easy. That's the work."; easyType && z >= 3 -> "Done. A little hot for an easy day."; ran.type == "test" -> "Benchmark recorded."; else -> "Hard session banked." }
+                val body = (if (easyType && z >= 3) "Next easy run, slow down or walk until you stay under ${zb[2]} bpm. " else "") + (if (part == "evening" || part == "night") tomorrowLine else "Nothing more to do today.")
+                Lead("done", if (z in 1..2) "proud" else if (z >= 4) "puffed" else "calm", "Today's run", title, body, run = ran)
+            }
+            onBreak(mon) -> Lead("break", "sleepy", "Week off", "Rest up. I'll be here.", "Your streak is safe and the plan picks up where you left it.")
+            left > 0 && left >= daysLeft -> Lead("risk", "puffed", "Streak check",
+                if (game.streak > 0) "Your ${game.streak}-week streak needs a run today" else "This week's goal needs a run today",
+                "$left more run${if (left == 1) "" else "s"} with $daysLeft day${if (daysLeft == 1) "" else "s"} left. An easy 20 minutes counts.", ses, today, cta = "Log a run")
+            ses != null && part == "night" -> Lead("late", "sleepy", "Getting late", "Short on time? 20 easy minutes still counts.",
+                "A short run keeps the habit alive. Or sleep on it: you need $left more run${if (left == 1) "" else "s"} this week and have ${daysLeft - 1} day${if (daysLeft - 1 == 1) "" else "s"} after today.", ses, today, cta = "Log a short run")
+            ses != null -> Lead("plan", "calm", when (part) { "morning" -> "Today's run"; "midday" -> "Later today"; else -> "Ready when you are" },
+                "${ses.title} · ${ses.min} min", ses.detail, ses, today, cta = "Log this run")
+            today.dayOfWeek.value == 1 && h < 12 && review() != null -> review()!!.let {
+                Lead("review", if (it.state == WeekState.HIT) "proud" else "calm", "Last week", "${it.n} of ${it.planned} runs · ${f1(it.km)} km", it.line + " " + (if (tomorrow != null) tomorrowLine else ""))
+            }
+            part == "evening" || part == "night" -> Lead("rest", "calm", "Rest day", tomorrow?.let { "Tomorrow: ${it.title} · ${it.min} min" } ?: "Two rest days in a row. Enjoy them.",
+                "Nothing to do tonight. Sleep is training too.")
+            else -> Lead("rest", "sleepy", "Rest day", "No run today. I'm recovering.", "Rest is when the training sinks in. A short strength session or a two-minute lesson is plenty.")
+        }
+    }
+
+    /** How Zone 2 pace has moved: against four weeks ago when there is history, otherwise against the start. */
+    fun paceChange(): PaceChange? {
+        val c = current ?: return null
+        val old = eligible.filter { ChronoUnit.DAYS.between(it.first.date, today) >= 28 }.takeLast(3)
+        if (old.isNotEmpty() && eligible.size > old.size) return PaceChange(old.map { it.second }.average() - c, "4 weeks ago")
+        if (eligible.size >= 3) return PaceChange(baseline!! - c, "when you started")
+        return null
+    }
+
+    /** How much to trust the Zone 2 estimate. Easy runs and tests read it directly; hard runs only hint at it. */
+    fun confidence(): Confidence? {
+        if (eligible.isEmpty()) return null
+        val recent = eligible.takeLast(5).map { it.first }
+        val easyRuns = recent.count { it.avgHr > 0 && zoneOf(it.avgHr) <= 2 }
+        val test = recent.any { it.type == "test" && ChronoUnit.DAYS.between(it.date, today) <= 35 }
+        return when {
+            test || easyRuns >= 3 -> Confidence(2, "Solid estimate", "Based on runs done at Zone 2 heart rate.")
+            easyRuns >= 1 -> Confidence(1, "Fair estimate", "Sharpens with two more easy runs or a Zone 2 test.")
+            else -> Confidence(0, "Rough estimate", "Worked out from harder runs. One easy run at Zone 2 heart rate will firm it up.")
+        }
+    }
+
+    /** Average running minutes over up to four earlier weeks that had a run; null when there is no history. */
+    fun usualWeekMinutes(): Int? = weeks.dropLast(1).filter { it.span.n > 0 }.takeLast(4).takeIf { it.isNotEmpty() }
+        ?.map { it.span.easy + it.span.hard }?.average()?.roundToInt()
 
     /** How the heart mascot feels about the current state of training. */
     fun mood(): String {

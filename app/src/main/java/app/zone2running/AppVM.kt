@@ -69,6 +69,8 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var toast by mutableStateOf<String?>(null)
     var healthGranted by mutableStateOf(false); private set
     var importing by mutableStateOf(false); private set
+    /** Time of day the home screen was last opened; it decides what leads. */
+    var clock by mutableStateOf(java.time.LocalTime.now())
 
     val settings get() = data.settings
     fun engine() = Engine(data.settings, data.runs, LocalDate.now())
@@ -97,6 +99,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshHealth() = viewModelScope.launch {
+        clock = java.time.LocalTime.now()
         healthGranted = try { health.granted() } catch (e: Exception) { false }
         if (healthGranted && settings.autoImport && settings.onboarded) importHealth(manual = false)
     }

@@ -2,6 +2,7 @@ package app.zone2running
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -30,50 +31,104 @@ import kotlin.math.roundToInt
 fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Unit, openLesson: (Lesson) -> Unit, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
     val game = vm.settings.gameOn
+    val lead = remember(e, vm.clock) { e.lead(vm.clock) }
+    val nextLesson = LESSONS.firstOrNull { it.id !in vm.settings.lessonsDone }
     var k = 0
 
-    // Dil speaks first: one line on how things stand.
-    Row(Modifier.rise(k++), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Dil(e.mood(), Modifier.size(76.dp))
-        Box(Modifier.weight(1f).clip(RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Text(e.moodLine(), fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
-        }
-    }
-
-    Box(Modifier.rise(k++)) { Hero(e) }
-
-    Panel(Modifier.rise(k++)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Label("Next session"); Spacer(Modifier.weight(1f)); Btn("Full plan", ghost = true, small = true, onClick = openPlan) }
-        val nx = e.nextSession()
-        when {
-            e.onBreak(mondayOf(e.today)) -> Body("You're taking this week off. The plan picks up where you left it.", p.muted)
-            nx == null -> Body("Pick your running days in Setup to get a plan.", p.muted)
-            else -> {
-                val (d, s) = nx
-                val gap = ChronoUnit.DAYS.between(e.today, d).toInt()
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.width(62.dp)) {
-                        Text("${s.min}", fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 38.sp, lineHeight = 38.sp, color = p.ink)
-                        Label("min")
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Head(s.title, 18)
-                        Small(when (gap) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)}" })
-                        Text(s.detail, fontSize = 14.sp, lineHeight = 19.sp, color = p.ink, fontFamily = BodyFont)
-                        if (s.type == "easy" || s.type == "long") e.easyRange()?.let { Small("Expect about ${fmtPace(it.first)}–${fmtPace(it.second)} /km. Go by heart rate, not this number.") }
-                        Spacer(Modifier.height(2.dp))
-                        Btn("Log this run", small = true) { openForm(FormSeed(date = d, type = s.type)) }
-                    }
-                }
+    // 1. The lead: one answer for this moment of the day.
+    Column(Modifier.rise(k++).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.surface).border(1.dp, p.line, RoundedCornerShape(18.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Dil(lead.mood, Modifier.size(84.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Label(lead.eyebrow)
+                Text(lead.title, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 29.sp, color = p.ink)
             }
+        }
+        Text(lead.body, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
+        lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let { Small("Heart rate cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first)}–${fmtPace(it.second)} /km, but go by heart rate.") }
+        lead.run?.let { RunFacts(it, e) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (lead.cta.isNotEmpty()) Btn(lead.cta) { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
+            if (lead.kind == "rest" && nextLesson != null) Btn("2-minute lesson", ghost = lead.cta.isNotEmpty()) { openLesson(nextLesson) }
+            if (lead.kind == "plan" || lead.kind == "rest" || lead.kind == "done") Btn("Full plan", ghost = true, onClick = openPlan)
         }
     }
 
     val mon = mondayOf(e.today)
+    val heroCard: @Composable () -> Unit = { Box(Modifier.rise(k++)) { Hero(e) } }
+    val weekCard: @Composable () -> Unit = { WeekCard(e, game, Modifier.rise(k++)) }
+    // After a run, the week is the next thing worth seeing; otherwise the pace is.
+    if (lead.kind == "done" || lead.kind == "risk") { weekCard(); heroCard() } else { heroCard(); weekCard() }
+
+    // The last run, when it isn't already the lead.
+    e.runs.lastOrNull()?.takeIf { lead.run == null }?.let { r ->
+        Panel(Modifier.rise(k++)) {
+            Row { Label("Last run"); Spacer(Modifier.weight(1f)); Small("${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}") }
+            RunFacts(r, e)
+        }
+    }
+
+    val rv = e.review()
+    if (rv != null && e.today.dayOfWeek.value <= 2 && lead.kind != "review") Panel(Modifier.rise(k++)) {
+        Label("Last week in review")
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Stat("${rv.n}/${rv.planned}", "runs"); Stat(f1(rv.km), "km"); Stat(rv.easyShare?.let { "$it%" } ?: "–", "easy")
+        }
+        NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line))
+    }
+
+    if (nextLesson != null && lead.kind != "rest") Panel(Modifier.rise(k++)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Label("Two-minute lesson" + if (game) " · 40 XP" else "")
+                Head(nextLesson.title, 18)
+            }
+            Btn("Start", ghost = true, small = true) { openLesson(nextLesson) }
+        }
+    }
+
+    if (vm.health.available() && !vm.healthGranted) Panel {
+        Label("Skip the typing")
+        Body("Connect Health Connect and runs recorded by your watch app are imported automatically, with distance, time and heart rate.")
+        Btn("Set up in Setup", ghost = true, small = true, onClick = openSetup)
+    }
+
+    val notes = e.coach().take(2)
+    if (notes.isNotEmpty() && e.runs.isNotEmpty()) Panel { Label("Coach notes"); notes.forEach { NoteBox(it) } }
+}
+
+/** A run in three numbers, plus where the heart rate actually sat. */
+@Composable
+fun RunFacts(r: Run, e: Engine) {
+    val p = LocalPal.current
+    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        Stat(f2(r.distKm), "km"); Stat(fmtDur(r.durSec), "time"); Stat(fmtPace(paceOf(r)), "/km"); if (r.avgHr > 0) Stat("${r.avgHr}", "bpm")
+    }
+    val tot = r.zoneSec.sum()
+    if (r.zoneSec.size == 5 && tot > 0) {
+        val grow = enter(700, 200)
+        Row(Modifier.fillMaxWidth(grow.coerceAtLeast(.02f)).height(14.dp).clip(RoundedCornerShape(7.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            r.zoneSec.forEachIndexed { i, sec -> if (sec > 0) Box(Modifier.weight(sec.toFloat() / tot).fillMaxHeight().background(p.zones[i])) }
+        }
+        val easy = r.zoneSec[0] + r.zoneSec[1]
+        Small("${easy / 60} of ${tot / 60} minutes in Zone 2 or below (${(easy * 100f / tot).roundToInt()}%).", p.ink)
+    } else if (r.avgHr > 0) {
+        val z = e.zoneOf(r.avgHr)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Dot(p.zones[z - 1]); Small("Averaged Zone $z. Import runs through Health Connect to see minutes in each zone.", p.ink)
+        }
+    }
+    e.est(r)?.let { Small("Zone 2 estimate from this run: ${fmtPace(it)} /km") }
+}
+
+@Composable
+private fun WeekCard(e: Engine, game: Boolean, modifier: Modifier) {
+    val p = LocalPal.current
+    val mon = mondayOf(e.today)
     val wk = e.weekHit(mon)
     val two = e.span(e.today.minusDays(13), e.today.plusDays(1))
     val share = (two.easy + two.hard).takeIf { it > 0 }?.let { (two.easy / it * 100).roundToInt() }
-    Panel(Modifier.rise(k++)) {
+    Panel(modifier) {
         Label("This week")
         val grow = enter(1000, 250)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -91,7 +146,8 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
                 RingLine(p.accent, "${wk.n} of ${wk.planned}", "sessions",
                     if (!game) "" else if (wk.hit) "Streak safe for this week" else (wk.need - wk.n).let { "$it more ${if (it == 1) "run keeps" else "runs keep"} your streak" })
                 RingLine(p.gold, share?.let { "$it%" } ?: "–", "easy, last 14 days", "Fill the ring at 80%")
-                RingLine(null, "${f1(wk.s.km)} km", "this week", "")
+                val mins = (wk.s.easy + wk.s.hard).roundToInt()
+                RingLine(null, "$mins min", "so far", e.usualWeekMinutes()?.let { "Your usual week is $it min" } ?: "${f1(wk.s.km)} km")
             }
         }
         if (game) {
@@ -99,53 +155,6 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
             Row { Label("Weekly quests"); Spacer(Modifier.weight(1f)); Small("50 XP each") }
             e.quests(mon).forEach { q -> QuestRow(q) }
         }
-    }
-
-    val rv = e.review()
-    if (rv != null && e.today.dayOfWeek.value <= 2) Panel(Modifier.rise(k++)) {
-        Label("Last week in review")
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Stat("${rv.n}/${rv.planned}", "runs"); Stat(f1(rv.km), "km"); Stat(rv.easyShare?.let { "$it%" } ?: "–", "easy")
-        }
-        NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line))
-    }
-
-    LESSONS.firstOrNull { it.id !in vm.settings.lessonsDone }?.let { next ->
-        Panel(Modifier.rise(k++)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Label("Two-minute lesson" + if (game) " · 40 XP" else "")
-                    Head(next.title, 18)
-                }
-                Btn("Start", small = true) { openLesson(next) }
-            }
-        }
-    }
-
-    if (game) Panel(Modifier.rise(k++)) {
-        val g = e.game; val c = e.challenge()
-        LevelBar(g)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-        Row { Label("${MONTHS_FULL[e.today.monthValue - 1]} challenge"); Spacer(Modifier.weight(1f)); Small("${c.daysLeft} day${if (c.daysLeft == 1) "" else "s"} left") }
-        Head("${c.goal} easy minutes", 18)
-        Meter(c.done.toFloat() / c.goal * enter(900, 300))
-        Small(if (c.done >= c.goal) "Done. ${c.done} easy minutes this month." else "${c.done} done, ${c.goal - c.done} to go. Only time in Zone 1–2 counts.")
-        Small("Rest passes: ${g.passes} of 2. A pass covers a missed week so your streak survives. You earn one every three completed weeks.")
-    }
-
-    if (vm.health.available() && !vm.healthGranted) Panel {
-        Label("Skip the typing")
-        Body("Connect Health Connect and runs recorded by your watch app are imported automatically, with distance, time and heart rate.")
-        Btn("Set up in Setup", ghost = true, small = true, onClick = openSetup)
-    }
-
-    val notes = e.coach()
-    if (notes.isNotEmpty()) Panel { Label("Coach notes"); notes.forEach { NoteBox(it) } }
-
-    Panel {
-        Row { Label("Your heart-rate zones"); Spacer(Modifier.weight(1f)); Small(mapOf("hrr" to "Heart-rate reserve", "max" to "% of max HR", "custom" to "Custom")[e.s.zoneMethod] ?: "") }
-        ZoneStrip(e)
-        Small("Zone 2 is where the easy running happens. Match these to your watch in Setup so both agree.")
     }
 }
 
@@ -236,17 +245,19 @@ fun Hero(e: Engine) {
                 Text(fmtPace(tg), Modifier.weight(1f), fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont, textAlign = TextAlign.End)
             }
         }
-        val t = e.trend
+        val ch = e.paceChange(); val conf = e.confidence()
         val line = when {
-            gap <= 0 -> "You are holding your target pace at Zone 2 heart rate. Set a faster target in Setup."
-            t != null && t.b < -0.02 -> {
-                val days = ((tg - t.a) / t.b).roundToInt()
-                if (days > 1100) "Your trend is nearly flat. More easy volume is the lever."
-                else t.t0.plusDays(days.toLong()).let { "On your current trend you reach ${fmtPace(tg)} around ${MONTHS[it.monthValue - 1]} ${it.year}, improving ${(-t.b * 30).roundToInt()} s/km a month." }
-            }
-            else -> "Typical progress is 10–20 s/km a month, so ${fmtPace(tg)} is roughly ${max(1, (gap / 20).roundToInt())}–${max(2, (gap / 10).roundToInt())} months of steady training away. A personal projection appears after 4 steady runs across 3 weeks."
+            gap <= 0 -> "You're holding your target at Zone 2 heart rate. Set a faster one in Setup."
+            ch == null -> "Log a few more runs to see how your pace is moving."
+            ch.delta >= 3 -> "${ch.delta.roundToInt()} seconds faster than ${ch.since}."
+            ch.delta <= -3 -> "${(-ch.delta).roundToInt()} seconds slower than ${ch.since}. Heat, tiredness or a hard run can do that."
+            else -> "Level with ${ch.since}."
         }
-        Text(line, color = p.heroMuted, fontSize = 14.5.sp, lineHeight = 20.sp, fontFamily = BodyFont)
+        Text(line, color = p.heroInk, fontSize = 16.sp, lineHeight = 22.sp, fontFamily = BodyFont, fontWeight = FontWeight.Medium)
+        if (conf != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { for (i in 0..2) Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= conf.level) p.heroMark else p.heroTrack)) }
+            Text("${conf.label}. ${conf.why}", color = p.heroMuted, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = BodyFont)
+        }
     }
 }
 

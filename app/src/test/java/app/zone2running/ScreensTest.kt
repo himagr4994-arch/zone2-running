@@ -83,6 +83,21 @@ class ScreensTest {
         Motion.on = false
     }
 
+    @Test @Config(qualifiers = "w400dp-h1500dp-xhdpi") fun todayChangesThroughTheDay() {
+        val vm = seeded()
+        vm.updateSettings { it.copy(days = (1..7).toList()) }                      // make today a run day
+        vm.clock = java.time.LocalTime.of(7, 0)
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("TODAY'S RUN").assertExists(); shot("moment-morning")
+        vm.clock = java.time.LocalTime.of(18, 30); rule.waitForIdle()
+        rule.onNodeWithText("READY WHEN YOU ARE").assertExists(); shot("moment-evening")
+        vm.clock = java.time.LocalTime.of(22, 30); rule.waitForIdle()
+        rule.onNodeWithText("GETTING LATE").assertExists(); shot("moment-late")
+        vm.clock = java.time.LocalTime.of(19, 30)
+        vm.saveRun(Run("now", today, "easy", 7.0, 3480, 141, zoneSec = listOf(240, 2400, 720, 120, 0)), isNew = false); rule.waitForIdle()
+        rule.onNodeWithText("Kept it easy. That's the work.").assertExists(); shot("moment-done")
+    }
+
     @Test fun lessonEarnsXp() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }

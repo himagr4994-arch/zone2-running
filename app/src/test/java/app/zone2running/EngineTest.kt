@@ -124,4 +124,34 @@ class EngineTest {
         assertTrue(LESSONS.all { it.answer in it.options.indices && it.cards.size == 3 })
         assertEquals(LESSONS.size, LESSONS.map { it.id }.toSet().size)
     }
+
+    private fun at(h: Int) = java.time.LocalTime.of(h, 0)
+
+    @Test fun leadFollowsTheDay() {
+        val plan = s.copy(planStart = today.minusWeeks(1))
+        val tue = today.plusDays(1); val wed = today.plusDays(2)
+        val history = easyWeek(1)
+        assertEquals("first", Engine(s, emptyList(), today).lead(at(8)).kind)
+        assertEquals("Today's run", Engine(plan, history, tue).lead(at(7)).eyebrow)
+        assertEquals("Later today", Engine(plan, history, tue).lead(at(13)).eyebrow)
+        assertEquals("Ready when you are", Engine(plan, history, tue).lead(at(18)).eyebrow)
+        assertEquals("late", Engine(plan, history, tue).lead(at(22)).kind)
+        assertEquals("rest", Engine(plan, history, wed).lead(at(9)).kind)
+        assertTrue(Engine(plan, history, wed).lead(at(20)).title.startsWith("Tomorrow: "))
+        assertEquals("review", Engine(plan, history, today).lead(at(8)).kind)          // Monday morning, rest day
+        val ran = history + Run("t", tue, "easy", 6.0, 2700, 142)
+        assertEquals("done", Engine(plan, ran, tue).lead(at(19)).kind)
+        assertEquals("break", Engine(plan.copy(breakWeeks = listOf(today)), history, tue).lead(at(8)).kind)
+        // Sunday with three runs still needed and one day left: the streak comes first.
+        assertEquals("risk", Engine(plan, history, today.plusDays(6)).lead(at(8)).kind)
+    }
+
+    @Test fun paceChangeAndConfidence() {
+        val hardOnly = Engine(s, listOf(tenK), today)
+        assertNull(hardOnly.paceChange()); assertEquals(0, hardOnly.confidence()!!.level)
+        val runs = listOf(35L to 3000, 30L to 2990, 12L to 2900, 5L to 2860, 1L to 2850).map { (ago, sec) -> Run("c$ago", today.minusDays(ago), "easy", 6.0, sec, 143) }
+        val e = Engine(s, runs, today)
+        assertEquals("4 weeks ago", e.paceChange()!!.since); assertTrue(e.paceChange()!!.delta > 10)
+        assertEquals(2, e.confidence()!!.level)
+    }
 }

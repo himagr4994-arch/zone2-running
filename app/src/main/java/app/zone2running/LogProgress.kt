@@ -194,6 +194,14 @@ fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
     }
     if (seg == 2) {
         Panel(Modifier.rise(2)) { LevelBar(g); Small("Easy minutes earn 2 XP each, harder minutes 1. Planned days, tests, completed weeks, quests, lessons and every 15 s gained add more.") }
+        Panel(Modifier.rise(3)) {
+            val c = e.challenge()
+            Row { Label("${MONTHS_FULL[e.today.monthValue - 1]} challenge"); Spacer(Modifier.weight(1f)); Small("${c.daysLeft} day${if (c.daysLeft == 1) "" else "s"} left") }
+            Head("${c.goal} easy minutes", 18)
+            Meter(c.done.toFloat() / c.goal * enter(900, 300))
+            Small(if (c.done >= c.goal) "Done. ${c.done} easy minutes this month." else "${c.done} done, ${c.goal - c.done} to go. Only time in Zone 1–2 counts.")
+            Small("Rest passes: ${g.passes} of 2. A pass covers a missed week so your streak survives. You earn one every three completed weeks.")
+        }
         return
     }
 
@@ -201,6 +209,12 @@ fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
         Head("Estimated Zone 2 pace, per run", 18)
         Small("Pace you would hold at ${e.refHr} bpm, worked out from each steady run. Faster is higher. Ringed points are Zone 2 tests.")
         if (e.eligible.isEmpty()) Body("Your trend appears here once you log a run with average heart rate.", p.muted) else PaceChart(e)
+        val tr = e.trend; val cur = e.current; val tg = e.s.targetPace.toDouble()
+        if (cur != null && cur > tg) Small(if (tr != null && tr.b < -0.02) {
+            val days = ((tg - tr.a) / tr.b).roundToInt()
+            if (days > 1100) "Your trend is nearly flat. More easy volume is the lever."
+            else tr.t0.plusDays(days.toLong()).let { "On this trend you reach ${fmtPace(tg)} around ${MONTHS[it.monthValue - 1]} ${it.year}, improving ${(-tr.b * 30).roundToInt()} s/km a month." }
+        } else "Typical progress is 10–20 s/km a month. A personal projection appears after 4 steady runs across 3 weeks.", p.ink)
     }
 
     Panel(Modifier.rise(2)) {

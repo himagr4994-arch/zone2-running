@@ -165,7 +165,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
         }
-        Small("Zone 2 Running 0.2.1 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("Zone 2 Running 0.3.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
     }
 }
 

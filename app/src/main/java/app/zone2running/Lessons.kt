@@ -3,7 +3,7 @@ package app.zone2running
 data class Card(val head: String, val body: String)
 data class Lesson(val id: String, val title: String, val cards: List<Card>, val question: String, val options: List<String>, val answer: Int, val why: String)
 
-/** Eight two-minute lessons. Claims are kept modest and match what the research supports. */
+/** Nine two-minute lessons. Claims are kept modest and match what the research supports. */
 val LESSONS = listOf(
     Lesson("zone2", "What is Zone 2?", listOf(
         Card("Five gears", "Heart-rate zones split effort into five gears, from a stroll in Zone 1 to all-out in Zone 5. Zone 2 is the second gear: clearly running, clearly comfortable."),
@@ -25,6 +25,11 @@ val LESSONS = listOf(
         Card("For the rest of us", "Research on recreational runners is thinner and less clear-cut. Doing most of your training easy with a little hard work is still a sound, widely used starting point."),
         Card("In this app", "The gold ring on Today tracks your easy share over 14 days. Aim to fill it at 80%."),
     ), "In an 80/20 week with five runs, how many are hard?", listOf("One", "Three", "Five"), 0, "One in five is 20%."),
+    Lesson("long", "Zone 2 and the long run", listOf(
+        Card("Long runs run on easy fuel", "The longer the run, the more it leans on your aerobic system, the same one Zone 2 trains. That is why long runs are done easy: the goal is time on your feet, not speed."),
+        Card("The marathon yardstick", "The average marathon finisher takes about 4 hours 30 minutes, roughly 6:24 per km. By standard coaching tables, that runner's easy Zone 2 pace is around 7:00 to 7:45 per km."),
+        Card("What a faster Zone 2 buys you", "Race pace sits a step above Zone 2 pace. Raise your Zone 2 pace and every pace above it comes up too, so the same long run feels easier or goes further."),
+    ), "The average marathon finisher's race pace is about…", listOf("4:30 per km", "6:24 per km", "9:00 per km"), 1, "About 4 hours 30 minutes for 42.2 km."),
     Lesson("drift", "Heart rate drifts", listOf(
         Card("Same pace, rising heart rate", "On a long or hot run your heart rate creeps up even when pace stays the same. That is cardiac drift: you are heating up and losing fluid."),
         Card("Heat costs beats", "A warm, humid evening can add several beats at the same pace, sometimes ten or more. That is not lost fitness."),

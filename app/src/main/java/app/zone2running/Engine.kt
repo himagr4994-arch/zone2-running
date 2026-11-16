@@ -82,7 +82,7 @@ val TYPE_NAMES = linkedMapOf(
 val DOW = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 val MONTHS_FULL = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
-const val LESSON_COUNT = 8
+const val LESSON_COUNT = 9
 val LEVEL_NAMES = listOf("Starter", "Jogger", "Base Builder", "Steady", "Aerobic", "Engine", "Diesel", "Metronome", "Long Hauler", "Tireless", "Marathon Heart", "Zone 2 Master")
 
 fun levelName(n: Int) = LEVEL_NAMES.getOrElse(n - 1) { "Level $n" }

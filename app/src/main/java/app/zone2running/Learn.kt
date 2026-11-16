@@ -32,7 +32,7 @@ fun LearnScreen(s: Settings, open: (Lesson) -> Unit) {
             Dil(if (done == LESSONS.size) "proud" else "hello", Modifier.size(64.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Head("Learn the easy way")
-                Small(if (done == LESSONS.size) "All lessons done. You know more about easy running than most runners." else "Eight two-minute lessons. Each ends with one question.")
+                Small(if (done == LESSONS.size) "All lessons done. You know more about easy running than most runners." else "${LESSONS.size} two-minute lessons. Each ends with one question.")
                 Meter(done.toFloat() / LESSONS.size * enter(800, 200))
             }
         }

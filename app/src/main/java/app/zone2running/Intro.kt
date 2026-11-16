@@ -39,7 +39,7 @@ private val SCENES = listOf(
     Scene("Hi, I'm Dil. I'm your heart.", "I do the work on every run. Give me two minutes and I'll show you how to make me stronger without wearing either of us out."),
     Scene("Most runs are too hard for me.", "Push every run and I'm always playing catch-up. You end up tired, running less than you could, and stuck at the same pace."),
     Scene("Slow down until you can chat.", "That's Zone 2. It feels almost too easy, and that's the point: easy running is the kind you can do a lot of, week after week."),
-    Scene("Same heartbeat, faster pace.", "As I get stronger, the same easy effort carries you faster. That number is your Zone 2 pace, and it's what this app tracks."),
+    Scene("Same heartbeat, faster pace.", "As I get stronger, the same easy effort carries you faster. That number is your Zone 2 pace. It sets what you can hold for hours: the average marathon finisher keeps up about 6:24 per km for four and a half."),
     Scene("Mostly easy. Sometimes hard.", "Top endurance athletes do roughly four-fifths of their training easy. The hard fifth still matters, so your plan keeps one harder session a week."),
     Scene("Here's the deal.", ""),
 )

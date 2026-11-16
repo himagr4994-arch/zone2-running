@@ -165,7 +165,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
         }
-        Small("Zone 2 Running 0.2.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("Zone 2 Running 0.2.1 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
     }
 }
 
@@ -192,153 +192,222 @@ fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) 
 
 private val LEVELS = listOf(Triple("Just starting", "Under 10 km a week", Triple(25, 40, false)), Triple("Running regularly", "10–25 km a week", Triple(35, 60, true)), Triple("Experienced", "More than 25 km a week", Triple(45, 80, true)))
 
+/** A big tappable answer. */
+@Composable
+private fun Choice(title: String, sub: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val p = LocalPal.current
+    val shape = RoundedCornerShape(14.dp)
+    Column(modifier.fillMaxWidth().clip(shape).background(if (on) p.goodBg else p.surface).border(if (on) 2.dp else 1.dp, if (on) p.accent else p.line, shape).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = p.ink)
+        if (sub.isNotEmpty()) Small(sub)
+    }
+}
+
+/** One number, set by dragging; the − and + buttons nudge it by a single step. */
+@Composable
+private fun Dial(value: Int, min: Int, max: Int, step: Int = 1, unit: String = "", show: (Int) -> String = { "$it" }, onChange: (Int) -> Unit) {
+    val p = LocalPal.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(show(value), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 72.sp, lineHeight = 72.sp, color = p.ink)
+            if (unit.isNotEmpty()) Text(" $unit", Modifier.padding(bottom = 10.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.muted)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("−", ghost = true) { onChange((value - step).coerceAtLeast(min)) }
+            androidx.compose.material3.Slider(value.toFloat(), { onChange((Math.round(it / step) * step).coerceIn(min, max)) }, Modifier.weight(1f), valueRange = min.toFloat()..max.toFloat())
+            Btn("+", ghost = true) { onChange((value + step).coerceAtMost(max)) }
+        }
+    }
+}
+
+/**
+ * The setup guide: one question per screen, asked by Dil. Most answers are a tap or a drag,
+ * and each one visibly changes the plan shown at the end.
+ */
 @Composable
 fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
     val p = LocalPal.current
     val s0 = vm.settings
     val today = LocalDate.now()
     val logged = remember { vm.engine().eligible.lastOrNull { it.first.id != "_base" }?.first }
-    var step by remember { mutableIntStateOf(0) }
-    var target by remember { mutableStateOf(fmtPace(s0.targetPace.toDouble())) }
-    var cur by remember { mutableStateOf(if (s0.basePace > 0) fmtPace(s0.basePace.toDouble()) else "") }
-    var hr by remember { mutableStateOf(if (s0.baseHr > 0) "${s0.baseHr}" else "") }
-    var age by remember { mutableStateOf("") }
-    var maxHr by remember { mutableStateOf(if (s0.onboarded) "${s0.maxHr}" else "") }
-    var rest by remember { mutableStateOf("${s0.restHr}") }
+    val steps = remember { listOfNotNull("age", "rest", if (logged == null) "now" else null, "target", "level", "days", "long", "commit", "remind", "plan") }
+    var at by remember { mutableIntStateOf(0) }
+    val step = steps[at]
+
+    var age by remember { mutableIntStateOf(30) }
+    var knowMax by remember { mutableStateOf(s0.onboarded) }
+    var maxHr by remember { mutableIntStateOf(if (s0.onboarded) s0.maxHr else 187) }
+    var rest by remember { mutableIntStateOf(s0.restHr) }
+    var knowNow by remember { mutableStateOf(s0.basePace > 0) }
+    var cur by remember { mutableIntStateOf(if (s0.basePace > 0) s0.basePace else 480) }
+    var hr by remember { mutableIntStateOf(if (s0.baseHr > 0) s0.baseHr else 150) }
+    var target by remember { mutableIntStateOf(s0.targetPace) }
+    var targetPick by remember { mutableIntStateOf(if (s0.onboarded) 3 else -1) }     // 0..2 = suggested, 3 = own
     var level by remember { mutableIntStateOf(-1) }
     var days by remember { mutableStateOf(s0.days) }
     var longDay by remember { mutableIntStateOf(s0.longDay) }
-    var easy by remember { mutableStateOf("${s0.easyMin}") }
-    var long by remember { mutableStateOf("${s0.longMin}") }
+    var easy by remember { mutableIntStateOf(s0.easyMin) }
+    var long by remember { mutableIntStateOf(s0.longMin) }
     var quality by remember { mutableStateOf(s0.quality) }
     var goalWeeks by remember { mutableIntStateOf(s0.goalWeeks) }
     var remind by remember { mutableStateOf(s0.remindOn) }
     var remindMin by remember { mutableIntStateOf(s0.remindMin) }
+    var adjust by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
 
     fun built(): Settings {
-        val cp = parseDur(cur); val h = hr.toIntOrNull() ?: 0
-        val base = logged == null && cp in 180..900 && h in 80..220
+        val base = logged == null && knowNow
         return s0.copy(
-            targetPace = parseDur(target).takeIf { it in 180..900 } ?: s0.targetPace,
-            maxHr = maxHr.toIntOrNull()?.takeIf { it in 120..230 } ?: s0.maxHr, restHr = rest.toIntOrNull()?.takeIf { it in 30..110 } ?: s0.restHr,
+            targetPace = target, maxHr = if (knowMax) maxHr else (208 - .7 * age).roundToInt(), restHr = rest,
             zoneMethod = if (s0.zoneMethod == "custom") "custom" else "hrr",
-            basePace = if (base) cp else s0.basePace, baseHr = if (base) h else s0.baseHr, baseDate = if (base) (s0.baseDate ?: today) else s0.baseDate,
-            days = days.sorted(), longDay = longDay, easyMin = easy.toIntOrNull()?.takeIf { it in 15..90 } ?: s0.easyMin,
-            longMin = long.toIntOrNull()?.takeIf { it in 30..180 } ?: s0.longMin, quality = quality,
+            basePace = if (base) cur else if (logged == null) 0 else s0.basePace, baseHr = if (base) hr else if (logged == null) 0 else s0.baseHr,
+            baseDate = if (base) (s0.baseDate ?: today) else s0.baseDate,
+            days = days.sorted(), longDay = if (longDay in days) longDay else days.maxOrNull() ?: 7, easyMin = easy, longMin = long, quality = quality,
             planStart = s0.planStart ?: mondayOf(today), onboarded = true, goalWeeks = goalWeeks, remindOn = remind, remindMin = remindMin,
         )
     }
-    fun check(): String = when (step) {
-        0 -> if (parseDur(target) !in 180..900) "Enter a target pace like 7:00." else ""
-        1 -> if (logged != null) "" else if (parseDur(cur) !in 180..900) "Enter your pace like 8:30." else if ((hr.toIntOrNull() ?: 0) !in 80..220) "Enter the heart rate you see at that pace." else ""
-        2 -> { val m = maxHr.toIntOrNull() ?: 0; val r = rest.toIntOrNull() ?: 0
-            if (m !in 120..230) "Enter your max heart rate, or your age to estimate it." else if (r !in 30..110) "Enter your resting heart rate. 60 is a fair guess." else if (m - r < 50) "Max and resting heart rate are too close. Check them." else "" }
-        3 -> if (days.size < 2) "Pick at least 2 running days." else ""
-        else -> ""
+    val preview = Engine(built(), vm.data.runs, today)
+    val now = preview.current
+    fun next() { error = ""; if (at < steps.lastIndex) at++ }
+    val round5 = { v: Double -> (v / 5).roundToInt() * 5 }
+
+    val ask = when (step) {
+        "age" -> "First things first. How old are you?"
+        "rest" -> "And when you're resting, how fast do I beat?"
+        "now" -> "Have you got a recent run I can learn from?"
+        "target" -> "What easy pace shall we chase?"
+        "level" -> "How much are you running these days?"
+        "days" -> "Which days can you run?"
+        "long" -> "Which day suits your longest run?"
+        "commit" -> "Easy running pays off over weeks. How long will you give it?"
+        "remind" -> "Want a nudge on run days?"
+        else -> "Here's your plan."
     }
 
     Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
-    Meter(animFloat((step + 1) / 6f, 350), Modifier.height(6.dp))
-    Panel {
-        Label("Step ${step + 1} of 6")
-        when (step) {
-            0 -> {
-                Head("What easy pace are you chasing?")
-                Body("Zone 2 is the effort where you can still talk in full sentences. The faster you run at that heart rate, the bigger your aerobic engine. Pick the pace you want to hold there.", p.muted)
-                Field("Target Zone 2 pace (min/km)", target, placeholder = "7:00", keyboard = KeyboardType.Ascii) { target = it }
-                Small("Not sure? A solid first target is 60–90 seconds per km faster than your easy pace today.")
-            }
-            1 -> {
-                Head("Where are you now?")
-                if (logged != null) {
-                    Body("Your starting point comes from the run you already logged.", p.muted)
-                    NoteBox(Note("plain", "${fmtDay(logged.date)}: ${fmtPace(paceOf(logged))} /km at ${logged.avgHr} bpm"))
-                } else {
-                    Body("Take any recent steady run, or your usual easy pace, and the heart rate you see at that pace. It does not need to be a Zone 2 run. The app converts it.", p.muted)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Field("Pace (min/km)", cur, Modifier.weight(1f), "8:30", KeyboardType.Ascii) { cur = it }
-                        Field("Heart rate", hr, Modifier.weight(1f), "150") { hr = it }
+    Meter(animFloat((at + 1f) / steps.size, 350), Modifier.height(6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Dil(if (step == "plan") "proud" else "hello", Modifier.size(72.dp))
+        Box(Modifier.weight(1f).clip(RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Text(ask, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 25.sp, color = p.ink)
+        }
+    }
+
+    key(step) {
+        Column(Modifier.rise(0), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when (step) {
+                "age" -> {
+                    if (!knowMax) {
+                        Dial(age, 14, 85, unit = "years") { age = it }
+                        NoteBox(Note("plain", "That puts my top speed at about ${(208 - .7 * age).roundToInt()} beats a minute. It's an estimate, and it sets your zones."))
+                        Text("I know my max heart rate", Modifier.clickable { knowMax = true; maxHr = (208 - .7 * age).roundToInt() }.padding(vertical = 6.dp), color = p.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    } else {
+                        Dial(maxHr, 140, 215, unit = "bpm max") { maxHr = it }
+                        Small("The highest heart rate you've seen at the end of an all-out effort.")
+                        Text("Estimate it from my age", Modifier.clickable { knowMax = false }.padding(vertical = 6.dp), color = p.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     }
                 }
-            }
-            2 -> {
-                Head("Your heart-rate zones")
-                Body("Enter your age to estimate max heart rate, or type the number if you know it. Resting heart rate is what your watch shows when you wake up.", p.muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field("Age", age, Modifier.weight(1f), "32") { v -> age = v; v.toIntOrNull()?.takeIf { it in 10..90 }?.let { maxHr = "${(208 - .7 * it).roundToInt()}" } }
-                    Field("Max HR", maxHr, Modifier.weight(1f), "188") { maxHr = it }
-                    Field("Resting HR", rest, Modifier.weight(1f), "60") { rest = it }
+                "rest" -> {
+                    Dial(rest, 38, 95, unit = "bpm") { rest = it }
+                    Small("Your watch shows this as resting heart rate. Not sure? Leave it at 60.")
+                    ZoneStrip(preview)
+                    Small("These are your zones. Zone 2 is where we'll spend most of our time.")
                 }
-                if ((maxHr.toIntOrNull() ?: 0) in 120..230) ZoneStrip(Engine(built(), emptyList(), today))
-                Small("You can copy exact zones from your watch later in Setup.")
-            }
-            3 -> {
-                Head("Your training week")
-                Small("How much do you run now?")
-                LEVELS.forEachIndexed { i, (name, sub, v) ->
-                    val shape = RoundedCornerShape(10.dp)
-                    Column(Modifier.fillMaxWidth().clip(shape).background(p.surface2).border(if (level == i) 2.dp else 1.dp, if (level == i) p.accent else p.line, shape)
-                        .clickable { level = i; easy = "${v.first}"; long = "${v.second}"; quality = v.third }.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                        Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, fontFamily = BodyFont); Small(sub)
+                "now" -> {
+                    Choice("Yes, I know a pace and heart rate", "Any steady run works. It doesn't have to be easy.", knowNow) { knowNow = true }
+                    Choice("Not yet", "I'll log or import a run first.", false) { knowNow = false; next() }
+                    if (knowNow) {
+                        Small("Average pace of that run")
+                        Dial(cur, 210, 780, 5, "/km", { fmtPace(it.toDouble()) }) { cur = it }
+                        Small("Average heart rate on it")
+                        Dial(hr, 95, 200, unit = "bpm") { hr = it }
+                        now?.let { NoteBox(Note("good", "So at an easy ${preview.refHr} bpm you'd run about ${fmtPace(it)} per km today. That's your starting line.")) }
                     }
                 }
-                Small("Days you can run")
-                DayPicker(days) { d -> days = if (d in days) days - d else days + d }
-                Small("Long run day")
-                DayPicker(listOf(longDay)) { longDay = it }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field("Easy run, minutes", easy, Modifier.weight(1f)) { easy = it }
-                    Field("Long run, minutes", long, Modifier.weight(1f)) { long = it }
+                "target" -> {
+                    if (now != null) {
+                        Small("Your Zone 2 pace today is about ${fmtPace(now)} /km.")
+                        listOf(Triple(45, "A steady step", "3–5"), Triple(75, "Ambitious", "4–8"), Triple(105, "A big goal", "6–11")).forEachIndexed { i, (gain, name, months) ->
+                            val t = round5(now - gain).coerceAtLeast(210)
+                            Choice("${fmtPace(t.toDouble())} /km · $name", "$gain seconds faster. Usually about $months months.", targetPick == i) { targetPick = i; target = t }
+                        }
+                        Choice("My own number", "", targetPick == 3) { targetPick = 3 }
+                    }
+                    if (now == null || targetPick == 3) Dial(target, 210, 720, 5, "/km", { fmtPace(it.toDouble()) }) { target = it; targetPick = 3 }
+                    Small("For scale: the average marathon finisher races at about 6:24 /km, and their easy Zone 2 pace is roughly 7:00 to 7:45.")
                 }
-                Toggle("One harder session a week", "Needs 4 or more running days.", quality) { quality = it }
-            }
-            4 -> {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { Dil("hello", Modifier.size(64.dp)); Head("Make it stick", modifier = Modifier.weight(1f)) }
-                Body("Easy running pays off over weeks, not days. How long will you give it?", p.muted)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(4 to "A fair try", 8 to "Real change", 12 to "New habit").forEach { (w, t) ->
-                        val shape = RoundedCornerShape(10.dp); val on = goalWeeks == w
-                        Column(Modifier.weight(1f).clip(shape).background(if (on) p.goodBg else p.surface2).border(if (on) 2.dp else 1.dp, if (on) p.accent else p.line, shape).clickable { goalWeeks = w }.padding(vertical = 12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("$w", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 30.sp, color = p.ink); Small("weeks"); Small(t, p.ink)
+                "level" -> LEVELS.forEachIndexed { i, (name, sub, v) ->
+                    Choice(name, sub, level == i) { level = i; easy = v.first; long = v.second; quality = v.third; next() }
+                }
+                "days" -> {
+                    DayPicker(days) { d -> days = if (d in days) days - d else days + d }
+                    Head("${days.size} run${if (days.size == 1) "" else "s"} a week", 20)
+                    Small(when { days.size < 2 -> "Pick at least two."; days.size <= 3 -> "A solid start. Every run will be easy."; days.size <= 5 -> "A good rhythm, with room for rest."; else -> "That's a lot of running. Make sure you keep a rest day when you need one." })
+                    if (days.size >= 4) Toggle("Include one harder session", "Short intervals or a tempo, once a week.", quality) { quality = it }
+                }
+                "long" -> {
+                    Small("It starts at $long minutes and grows slowly.")
+                    days.sorted().chunked(4).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { d -> Pick(listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")[d - 1], longDay == d, Modifier.weight(1f)) { longDay = d; next() } }
+                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
-                Small("A week counts when you finish about three-quarters of its runs. Miss one and a rest pass covers it.")
-                ReminderPicker(remind, remindMin) { on, m -> remind = on; remindMin = m }
-            }
-            else -> {
-                val e = Engine(built(), vm.data.runs, today)
-                val c = e.current; val tg = e.s.targetPace.toDouble(); val gap = (c ?: tg) - tg
-                val plan = e.weekPlan(mondayOf(today))
-                Head("Your plan is ready")
-                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Column { Label("Zone 2 now"); Text(c?.let { fmtPace(it) } ?: "–", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 58.sp, lineHeight = 58.sp, color = p.ink) }
-                    Text("to", Modifier.padding(bottom = 10.dp), fontFamily = Display, fontSize = 30.sp, color = p.muted)
-                    Column { Label("Target"); Text(fmtPace(tg), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 58.sp, lineHeight = 58.sp, color = p.ink) }
+                "commit" -> {
+                    listOf(Triple(4, "A fair try", "Long enough to feel the difference."), Triple(8, "Real change", "Long enough to see your pace move."), Triple(12, "A new habit", "Long enough that it sticks.")).forEach { (w, t, sub) ->
+                        Choice("$w weeks · $t", sub, goalWeeks == w) { goalWeeks = w; next() }
+                    }
+                    Small("A week counts when you finish about three-quarters of its runs. Miss one and a rest pass covers it.")
                 }
-                Body(if (gap > 0) "That is ${fmtPace(gap)} per km to gain at ${e.refHr} bpm. Runners typically gain 10–20 s/km a month with consistent easy running, so plan for about ${max(1, (gap / 20).roundToInt())}–${max(2, (gap / 10).roundToInt())} months."
-                else "You already hold this pace in Zone 2. Go back and pick a faster target, or keep it and use the plan to stay there.")
-                Label("Week 1 · ${plan.total} minutes")
-                plan.ses.entries.forEachIndexed { i, (d, ses) ->
-                    if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(DOW[d - 1], Modifier.width(44.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = p.ink)
-                        Column { Text("${ses.title} · ${ses.min} min", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, fontFamily = BodyFont); Small(ses.detail) }
+                "remind" -> ReminderPicker(remind, remindMin) { on, m -> remind = on; remindMin = m }
+                else -> {
+                    val tg = preview.s.targetPace.toDouble(); val gap = (now ?: tg) - tg
+                    val plan = preview.weekPlan(mondayOf(today))
+                    Panel {
+                        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column { Label("Zone 2 now"); Text(now?.let { fmtPace(it) } ?: "–", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 58.sp, lineHeight = 58.sp, color = p.ink) }
+                            Text("to", Modifier.padding(bottom = 10.dp), fontFamily = Display, fontSize = 30.sp, color = p.muted)
+                            Column { Label("Target"); Text(fmtPace(tg), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 58.sp, lineHeight = 58.sp, color = p.ink) }
+                        }
+                        Body(when {
+                            now == null -> "Log or import your first run and I'll work out where you're starting from."
+                            gap > 0 -> "That is ${fmtPace(gap)} per km to gain at ${preview.refHr} bpm. Runners typically gain 10–20 s/km a month with consistent easy running, so plan for about ${max(1, (gap / 20).roundToInt())}–${max(2, (gap / 10).roundToInt())} months."
+                            else -> "You already hold this pace in Zone 2. Go back and pick a faster target, or keep it and use the plan to stay there."
+                        })
+                        Label("Week 1 · ${plan.total} minutes")
+                        plan.ses.entries.forEachIndexed { i, (d, ses) ->
+                            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(DOW[d - 1], Modifier.width(44.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = p.ink)
+                                Column { Text("${ses.title} · ${ses.min} min", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, fontFamily = BodyFont); Small(ses.detail) }
+                            }
+                        }
+                        NoteBox(Note("plain", "Built from your answers: Zone 2 of ${preview.zb[1]}–${preview.zb[2] - 1} bpm from max ${preview.s.maxHr} and resting ${preview.s.restHr}. ${plan.ses.size} runs on the days you picked. A $goalWeeks-week streak to aim for."))
+                        Text(if (adjust) "Hide run lengths" else "Adjust run lengths", Modifier.clickable { adjust = !adjust }.padding(vertical = 4.dp), color = p.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        if (adjust) {
+                            Small("Easy run"); Dial(easy, 15, 90, 5, "min") { easy = it }
+                            Small("Long run"); Dial(long, 30, 180, 5, "min") { long = it }
+                        }
                     }
                 }
-                NoteBox(Note("plain", "Built from your answers: Zone 2 of ${e.zb[1]}–${e.zb[2] - 1} bpm from max ${e.s.maxHr} and resting ${e.s.restHr}. ${plan.ses.size} runs on the days you picked. A $goalWeeks-week streak to aim for. All of it can be changed in Setup."))
             }
         }
-        if (error.isNotEmpty()) NoteBox(Note("warn", error))
-        Row {
-            if (step > 0 || canClose) Btn(if (step == 0) "Close" else "Back", ghost = true) { error = ""; if (step == 0) close() else step-- }
-            Spacer(Modifier.weight(1f))
-            Btn(if (step == 5) "Start training" else if (step == 4) "I'm in for $goalWeeks weeks" else "Next") {
-                error = check()
-                if (error.isEmpty()) { if (step < 5) step++ else { val b = built(); vm.updateSettings { b }; vm.setReminder(b.remindOn, b.remindMin); vm.refreshHealth(); close() } }
+    }
+    if (error.isNotEmpty()) NoteBox(Note("warn", error))
+    Row {
+        if (at > 0 || canClose) Btn(if (at == 0) "Close" else "Back", ghost = true) { error = ""; if (at == 0) close() else at-- }
+        Spacer(Modifier.weight(1f))
+        val tapOnly = step == "level" && level < 0      // nothing to confirm until a card is tapped
+        if (!tapOnly) Btn(when (step) { "plan" -> "Start training"; "remind" -> if (remind) "Next" else "Not now"; else -> "Next" }) {
+            error = when {
+                step == "days" && days.size < 2 -> "Pick at least two running days."
+                step == "age" && knowMax && maxHr - rest < 50 -> "Max and resting heart rate are too close. Check them."
+                step == "rest" && preview.s.maxHr - rest < 50 -> "Resting heart rate is too close to your max. Check it."
+                step == "target" && now != null && targetPick < 0 -> "Pick a target to continue."
+                else -> ""
             }
+            if (error.isEmpty()) { if (step != "plan") next() else { val b = built(); vm.updateSettings { b }; vm.setReminder(b.remindOn, b.remindMin); vm.refreshHealth(); close() } }
         }
     }
 }

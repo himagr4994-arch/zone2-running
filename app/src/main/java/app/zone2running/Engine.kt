@@ -87,6 +87,7 @@ data class Settings(
     val weatherOn: Boolean = false, val city: String = "", val lat: Double = 0.0, val lon: Double = 0.0,
     val voiceOn: Boolean = true, val sensorAddr: String = "", val sensorName: String = "",
     val updateCheck: Boolean = false, val disclaimerOk: Boolean = false,
+    val seenPace: Int = 0,                     // the Zone 2 pace last shown on the home screen, to notice when it improves
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String, val kind: String = type)
@@ -97,7 +98,7 @@ data class Progress(val have: Double, val need: Double, val unit: String)
 data class Badge(val id: String, val glyph: String, val tier: Int, val name: String, val desc: String, val got: Boolean, val prog: Progress? = null)
 enum class WeekState { HIT, MISS, FROZEN, BREAK, OPEN }
 data class WeekRec(val mon: LocalDate, val state: WeekState, val idx: Int, val span: Span)
-data class Quest(val title: String, val have: Int, val need: Int, val xp: Int = 50) { val done get() = have >= need }
+data class Quest(val title: String, val have: Int, val need: Int) { val done get() = have >= need }
 data class Review(val mon: LocalDate, val state: WeekState, val n: Int, val planned: Int, val easyShare: Int?, val km: Double, val line: String)
 /** The one thing the home screen leads with right now. */
 data class Lead(val kind: String, val mood: String, val eyebrow: String, val title: String, val body: String,
@@ -113,9 +114,9 @@ data class Note(val tone: String, val text: String)   // tone: warn, good, plain
 data class Trend(val a: Double, val b: Double, val t0: LocalDate)
 data class Challenge(val goal: Int, val done: Int, val daysLeft: Int)
 data class Game(
-    val xp: Int, val streak: Int, val best: Int, val weeksHit: Int, val km: Double, val longest: Double,
+    val streak: Int, val best: Int, val weeksHit: Int, val km: Double, val longest: Double,
     val longSec: Int, val z2runs: Int, val tests: Int, val bestEst: Double?, val fast: Double?,
-    val bigWeek: Double, val gain: Double, val level: Int, val lo: Int, val hi: Int, val badges: List<Badge>,
+    val bigWeek: Double, val gain: Double, val badges: List<Badge>,
     val passes: Int = 0, val questsDone: Int = 0,
 )
 
@@ -127,9 +128,7 @@ val DOW = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 val MONTHS_FULL = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
 const val LESSON_COUNT = 9
-val LEVEL_NAMES = listOf("Starter", "Jogger", "Base Builder", "Steady", "Aerobic", "Engine", "Diesel", "Metronome", "Long Hauler", "Tireless", "Marathon Heart", "Zone 2 Master")
 
-fun levelName(n: Int) = LEVEL_NAMES.getOrElse(n - 1) { "Level $n" }
 fun fmtPace(secPerKm: Double): String { val s = (if (U.miles) secPerKm * U.MI else secPerKm).roundToInt(); return "${s / 60}:${(s % 60).toString().padStart(2, '0')}" }
 fun fmtDur(sec: Int): String {
     val h = sec / 3600; val m = sec % 3600 / 60; val s = sec % 60
@@ -407,13 +406,11 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     }
 
     val game: Game by lazy {
-        var xp = 0; var km = 0.0; var longest = 0.0; var longSec = 0; var z2 = 0; var tests = 0
+        var km = 0.0; var longest = 0.0; var longSec = 0; var z2 = 0; var tests = 0
         var hour = false; var fast: Double? = null
         for (r in runs) {
             val mins = r.durSec / 60.0
-            xp += (mins * (if (isEasy(r)) 2 else 1)).roundToInt()          // easy minutes earn double
-            if (weekPlan(mondayOf(r.date)).ses.containsKey(r.date.dayOfWeek.value)) xp += 20
-            if (r.type == "test") { xp += 100; tests++ }
+            if (r.type == "test") tests++
             km += r.distKm; longest = max(longest, r.distKm); longSec = max(longSec, r.durSec)
             if (r.avgHr > 0 && zoneOf(r.avgHr) <= 2 && mins >= 20) { z2++; if (mins >= 60) hour = true }
             val p = paceOf(r); if (r.distKm >= 3 && (fast == null || p < fast)) fast = p
@@ -424,18 +421,15 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             val tot = w.span.easy + w.span.hard
             bigWeek = max(bigWeek, w.span.km)
             if (w.span.n >= 3 && tot > 0 && w.span.easy / tot >= .8) pol = true
-            val q = quests(w.mon).count { it.done }; questsDone += q; xp += q * 50; if (q == 3) fullQuestWeek = true
+            val q = quests(w.mon).count { it.done }; questsDone += q; if (q == 3) fullQuestWeek = true
             when (w.state) {
-                WeekState.HIT -> { streak++; weeksHit++; xp += 100; best = max(best, streak) }
+                WeekState.HIT -> { streak++; weeksHit++; best = max(best, streak) }
                 WeekState.MISS -> streak = 0
                 else -> Unit                      // a rest pass, a break or the week in progress leaves the streak alone
             }
         }
-        xp += s.lessonsDone.distinct().size * 40
         val c = current; val b0 = baseline
         val gain = if (b0 != null && c != null && eligible.size >= 3) max(0.0, b0 - c) else 0.0   // two points are noise, not progress
-        xp += floor(gain / 15).toInt() * 150
-        var lv = 1; while (150 * (lv + 1) * lv <= xp) lv++
         val badges = listOf(
             Badge("first", "1", 1, "First steps", "Log your first run.", runs.isNotEmpty()),
             Badge("z2", "Z2", 1, "True easy", "Finish a run of 20+ minutes with average HR in Zone 2.", z2 >= 1),
@@ -459,7 +453,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             Badge("learn", "A+", 2, "Student", "Finish every lesson.", s.lessonsDone.distinct().size >= LESSON_COUNT, Progress(s.lessonsDone.distinct().size.toDouble(), LESSON_COUNT.toDouble(), "lessons")),
             Badge("goal", fmtPace(s.targetPace.toDouble()), 3, "Arrived", "Hold your target pace at Zone 2 heart rate.", c != null && c <= s.targetPace),
         )
-        Game(xp, streak, best, weeksHit, km, longest, longSec, z2, tests, bestEst, fast, bigWeek, gain, lv, 150 * lv * (lv - 1), 150 * (lv + 1) * lv, badges, weekCalc.second, questsDone)
+        Game(streak, best, weeksHit, km, longest, longSec, z2, tests, bestEst, fast, bigWeek, gain, badges, weekCalc.second, questsDone)
     }
 
     /** Up to three notes drawn from the runner's own numbers. */

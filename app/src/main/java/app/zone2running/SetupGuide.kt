@@ -493,26 +493,28 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
 fun RewardScreen(c: Celebration, share: () -> Unit, done: () -> Unit) {
     val p = LocalPal.current
     val pop = enter(650, 100)
-    Text("ZONE 2 RUNNING", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, letterSpacing = 1.sp, color = p.ink)
-    Panel {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Dil(if (c.celebrate) "proud" else "calm", Modifier.size((56 + 24 * pop).dp))
-            Column { Label("Run logged"); Head(if (c.streakMilestone > 0) "${c.streakMilestone}-week streak!" else c.title) }
-        }
-        Text("+${(c.xp * pop).toInt()} XP", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 76.sp, lineHeight = 72.sp, color = p.accent)
-        LevelBar(c.game)
-        Body(c.message)
-        NoteBox(Note("plain", c.summary + (c.estLine?.let { "\n$it" } ?: "")))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Flame(if (c.streakOn) p.hard else p.muted); Small(c.streakLine, p.ink) }
-        if (c.newBadges.isNotEmpty()) c.newBadges.chunked(4).forEach { row ->
-            Row(Modifier.graphicsLayer { scaleX = .6f + .4f * pop; scaleY = .6f + .4f * pop; alpha = pop }, horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { Medal(it, Modifier.weight(1f)) }; repeat(4 - row.size) { Spacer(Modifier.weight(1f)) } }
-        }
-        c.records.forEach { NoteBox(Note("good", it)) }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Btn("Done", onClick = done)
-            Btn("Share", ghost = true, onClick = share)
-        }
+    val strong = haptic()
+    LaunchedEffect(Unit) { if (c.celebrate) strong(true) }
+    val r = c.run
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Dil(if (c.celebrate || c.zone in 1..2) "proud" else "calm", Modifier.size((96 + 44 * pop).dp), running = true)
+        Label("Run logged")
+        Text(if (c.streakMilestone > 0) "${c.streakMilestone}-week streak!" else c.title, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 36.sp, lineHeight = 38.sp, color = p.ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(c.message, fontFamily = BodyFont, fontSize = 16.sp, lineHeight = 23.sp, color = p.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
+    Row {
+        for ((v, l) in listOf(f2(U.k(r.distKm)) to U.unit, fmtDur(r.durSec) to "time", fmtPace(paceOf(r)) to U.per, (if (r.avgHr > 0) "${r.avgHr}" else "–") to "bpm"))
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(v, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, color = p.ink); Small(l) }
+    }
+    if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) ZoneBar(r.zoneSec)
+    c.estLine?.let { NoteBox(Note("plain", it)) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Flame(if (c.streakOn) p.hard else p.muted); Small(c.streakLine, p.ink) }
+    if (c.newBadges.isNotEmpty()) c.newBadges.chunked(4).forEach { row ->
+        Row(Modifier.graphicsLayer { scaleX = .6f + .4f * pop; scaleY = .6f + .4f * pop; alpha = pop }, horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { Medal(it, Modifier.weight(1f)) }; repeat(4 - row.size) { Spacer(Modifier.weight(1f)) } }
+    }
+    c.records.forEach { NoteBox(Note("good", it)) }
+    BigBtn("Done", onClick = done)
+    BigBtn("Share", ghost = true, onClick = share)
 }
 
 /** Crash report and update switch, shown on the About page. */

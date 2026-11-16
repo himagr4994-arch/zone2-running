@@ -7,6 +7,7 @@ Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace do
 ## What it does
 
 - **An opening story.** Dil, a small heart, explains in six animated scenes why most running should feel easy and what Zone 2 pace is.
+- **A touchable pace chart.** Your Zone 2 pace sits on its own history; drag across it to read any run.
 - **A home screen that follows your day.** It leads with one thing: the session in the morning, a nudge in the evening, the run itself once it is done, a shorter option when it gets late, tomorrow's plan on a rest day.
 - **It learns your routine and asks first.** After a few timed runs it knows when you usually run, shifts the home screen to match, and offers to move the reminder or a plan day. Nothing changes without a yes, and all of it is worked out on the phone.
 - **Setup guide.** Enter a target pace, any recent pace with the heart rate you saw at it, and your age or max heart rate. You get your zones, your current Zone 2 pace and a plan, with a note on which answer produced what.
@@ -21,7 +22,7 @@ Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace do
 - **Health Connect import.** Runs recorded by your watch app, Strava, unstrap or anything else that writes to Health Connect arrive with distance, time, heart rate and time in each zone. Read-only.
 - **Nine two-minute lessons**, each ending with one question.
 - **Streaks that forgive.** A week counts at about three-quarters of its runs. Rest passes cover a missed week, and a week marked as time off never breaks the streak.
-- **Weekly quests, levels and badges** that reward easy minutes twice as much as hard ones. One switch in Setup turns the whole game layer off.
+- **Weekly quests and badges.** One switch in Settings turns the whole game layer off.
 - **A daily reminder** on run days, and a picture of each run to share.
 - **Local backup.** Pick a folder for a daily backup, or export and restore a single JSON file.
 

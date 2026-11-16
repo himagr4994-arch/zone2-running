@@ -45,10 +45,8 @@ class EngineTest {
         assertEquals(60, p.ses[7]!!.min)
     }
 
-    @Test fun xpLevelAndBadges() {
+    @Test fun firstRunEarnsItsBadges() {
         val g = Engine(s, listOf(tenK), today).game
-        assertEquals(72, g.xp)           // 71.6 hard minutes, Monday is not a planned day
-        assertEquals(1, g.level)
         assertEquals(setOf("first", "l10"), g.badges.filter { it.got }.map { it.id }.toSet())
     }
 

@@ -102,6 +102,6 @@ fun LessonScreen(l: Lesson, already: Boolean, close: () -> Unit, finish: () -> U
         if (step > 0) Btn("Back", ghost = true) { step--; picked = -1 }
         Spacer(Modifier.weight(1f))
         if (step < l.cards.size) Btn(if (step == l.cards.size - 1) "Quick question" else "Next") { step++ }
-        else if (picked == l.answer) Btn(if (already) "Done" else "Finish · +40 XP") { if (already) close() else finish() }
+        else if (picked == l.answer) Btn(if (already) "Done" else "Finish") { if (already) close() else finish() }
     }
 }

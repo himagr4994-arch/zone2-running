@@ -2,9 +2,9 @@ package app.zone2running
 
 import android.graphics.Bitmap
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -22,66 +22,72 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalTime
 
 /** Drives the real screens on the JVM and saves a picture of each one. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34], qualifiers = "w400dp-h2700dp-xhdpi")
+@Config(sdk = [34], qualifiers = "w400dp-h1900dp-xhdpi")
 class ScreensTest {
     @get:Rule val rule = createComposeRule()
     private val today = LocalDate.now()
 
-    @Before fun still() { Motion.on = false }
+    @Before fun still() { Motion.on = false; U.miles = false; Live.snap = LiveSnap() }
 
     private fun seeded(): AppVM {
         val vm = AppVM(ApplicationProvider.getApplicationContext())
-        vm.updateSettings { it.copy(introSeen = true, onboarded = true, maxHr = 188, planStart = mondayOf(today).minusWeeks(5), lessonsDone = listOf("zone2", "talk")) }
+        vm.updateSettings { it.copy(introSeen = true, onboarded = true, disclaimerOk = true, maxHr = 188, planStart = mondayOf(today).minusWeeks(5), lessonsDone = listOf("zone2", "talk")) }
         listOf(
             Triple(30L, "hard", Triple(10.26, 4297, 162)), Triple(27L, "easy", Triple(5.0, 2700, 146)), Triple(26L, "easy", Triple(6.0, 3180, 146)),
             Triple(22L, "long", Triple(9.0, 4800, 145)), Triple(20L, "easy", Triple(5.0, 2650, 144)), Triple(18L, "easy", Triple(5.0, 2600, 143)),
             Triple(15L, "test", Triple(5.6, 2900, 144)), Triple(13L, "long", Triple(10.5, 5400, 145)), Triple(11L, "easy", Triple(6.0, 3100, 143)),
-            Triple(9L, "easy", Triple(6.2, 3150, 143)), Triple(5L, "tempo", Triple(7.0, 3000, 158)), Triple(1L, "easy", Triple(6.5, 3250, 142)),
+            Triple(9L, "easy", Triple(6.2, 3150, 143)), Triple(5L, "tempo", Triple(7.0, 3000, 158)),
         ).forEach { (ago, type, v) -> vm.saveRun(Run("r$ago", today.minusDays(ago), type, v.first, v.second, v.third), isNew = false) }
-        vm.toast = null
+        vm.saveRun(Run("r1", today.minusDays(1), "easy", 6.5, 3250, 142, zoneSec = listOf(200, 2450, 520, 80, 0), splits = listOf(Split(505, 139), Split(498, 141), Split(502, 142), Split(496, 143), Split(499, 143), Split(494, 144))), isNew = false)
+        vm.toast = null; vm.clock = LocalTime.of(18, 0)
         return vm
     }
 
     private fun shot(name: String) = rule.onRoot().captureRoboImage("build/shots/$name.png")
+    private fun tab(name: String) { rule.onNodeWithText(name).performClick(); rule.waitForIdle() }
+    private fun cog(row: String) { rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText(row).performClick(); rule.waitForIdle() }
+    private fun back(times: Int = 1) { repeat(times) { rule.onNodeWithContentDescription("Back").performClick() }; rule.waitForIdle() }
 
-    @Test fun everyTabLight() {
+    @Test fun threeTabsAndTheCog() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
         shot("today")
-        for (t in listOf("PLAN", "PROGRESS")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
-        rule.onNodeWithText("LEARN").assertDoesNotExist(); rule.onNodeWithText("SETUP").assertDoesNotExist()
-        // Everything else lives behind the cog.
-        rule.onNodeWithContentDescription("Settings").performClick(); rule.waitForIdle(); shot("more")
-        rule.onNodeWithText("Learn").performClick(); rule.waitForIdle(); shot("learn")
-        rule.onNodeWithContentDescription("Back").performClick()
-        rule.onNodeWithText("Settings").performClick(); rule.waitForIdle(); shot("settings")
-        rule.onNodeWithContentDescription("Back").performClick()
-        rule.onNodeWithText("About").performClick(); rule.waitForIdle(); shot("about")
-        rule.onNodeWithText("Privacy policy").performClick(); rule.waitForIdle(); shot("privacy")
-        rule.onNodeWithContentDescription("Back").performClick()
-        rule.onNodeWithText("Licences and credits").performClick(); rule.waitForIdle(); shot("licences")
-        rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick()
-        rule.waitForIdle(); rule.onNodeWithText("TODAY").assertExists()
-        rule.onNodeWithText("PROGRESS").performClick()
+        tab("Plan"); shot("plan")
+        tab("Progress"); shot("progress")
         rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("runs")
-        rule.onNodeWithText("Badges").performClick(); rule.waitForIdle(); shot("badges")
-        rule.onNodeWithText("PLAN").performClick()
-        rule.onNodeWithText("Take week off").performScrollTo().performClick(); rule.waitForIdle()
-        assertEquals(listOf(mondayOf(today)), vm.settings.breakWeeks)
-        shot("plan-week-off")
+        val d = today.minusDays(1)
+        rule.onNodeWithText("${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)} · Easy run").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("WHAT IT SAYS").assertExists(); shot("run-page")
+        rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
+        rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()
+        rule.onNodeWithText("WHAT IT SAYS").assertExists()
     }
 
-    @Test @Config(qualifiers = "w400dp-h2700dp-night-xhdpi") fun todayAndProgressDark() {
+
+    @Test fun badgesWeekOffAndEverythingBehindTheCog() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
-        shot("today-dark")
-        rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Learn").performClick(); rule.waitForIdle(); shot("learn-dark")
-        rule.onNodeWithContentDescription("Back").performClick(); rule.onNodeWithContentDescription("Back").performClick()
-        rule.onNodeWithText("PROGRESS").performClick(); rule.waitForIdle(); shot("progress-dark")
+        tab("Progress"); rule.onNodeWithText("Badges").performClick(); rule.waitForIdle(); shot("badges")
+        tab("Plan")
+        rule.onNodeWithText("Take this week off").performScrollTo().performClick(); rule.waitForIdle()
+        assertEquals(listOf(mondayOf(today)), vm.settings.breakWeeks); shot("plan-week-off")
+        cog("Learn"); shot("learn"); back()
+        rule.onNodeWithText("Settings").performClick(); rule.waitForIdle(); shot("settings"); back()
+        rule.onNodeWithText("About").performClick(); rule.waitForIdle(); shot("about")
+        rule.onNodeWithText("Privacy policy").performClick(); rule.waitForIdle(); shot("privacy"); back()
+        rule.onNodeWithText("Licences and credits").performClick(); rule.waitForIdle(); back(3)
+        rule.onNodeWithText("Today").assertExists()
+    }
+
+    @Test @Config(qualifiers = "w400dp-h1900dp-night-xhdpi") fun dark() {
+        val vm = seeded()
+        rule.setContent { AppTheme { App(vm) } }
+        shot("today-dark"); tab("Plan"); shot("plan-dark"); tab("Progress"); shot("progress-dark")
     }
 
     @Test @Config(qualifiers = "w400dp-h860dp-xhdpi") fun introStoryInMotion() {
@@ -90,7 +96,7 @@ class ScreensTest {
         rule.mainClock.autoAdvance = false
         rule.setContent { AppTheme { App(vm) } }
         for (i in 1..6) {
-            for (f in 0 until 16) { rule.mainClock.advanceTimeBy(150); shot("frames/intro-$i-${f.toString().padStart(2, '0')}") }
+            rule.mainClock.advanceTimeBy(2400)
             shot("intro-$i")
             rule.onNodeWithText(if (i < 6) "Next" else "Build my plan").performClick()
             rule.mainClock.advanceTimeBy(700)
@@ -99,19 +105,30 @@ class ScreensTest {
         Motion.on = false
     }
 
-    @Test @Config(qualifiers = "w400dp-h1500dp-xhdpi") fun todayChangesThroughTheDay() {
+    @Test @Config(qualifiers = "w400dp-h900dp-xhdpi") fun todayChangesThroughTheDay() {
         val vm = seeded()
         vm.updateSettings { it.copy(days = (1..7).toList()) }                      // make today a run day
-        vm.clock = java.time.LocalTime.of(7, 0)
+        vm.clock = LocalTime.of(7, 0)
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("TODAY'S RUN").assertExists(); shot("moment-morning")
-        vm.clock = java.time.LocalTime.of(18, 30); rule.waitForIdle()
-        rule.onNodeWithText("READY WHEN YOU ARE").assertExists(); shot("moment-evening")
-        vm.clock = java.time.LocalTime.of(22, 30); rule.waitForIdle()
-        rule.onNodeWithText("GETTING LATE").assertExists(); shot("moment-late")
-        vm.clock = java.time.LocalTime.of(19, 30)
+        vm.clock = LocalTime.of(18, 30); rule.waitForIdle()
+        rule.onNodeWithText("READY WHEN YOU ARE").assertExists()
+        rule.onNodeWithText("Details").performClick(); rule.waitForIdle(); shot("moment-evening-details")
+        vm.clock = LocalTime.of(22, 30); rule.waitForIdle()
+        rule.onNodeWithText("GETTING LATE").assertExists()
+        vm.clock = LocalTime.of(19, 30)
         vm.saveRun(Run("now", today, "easy", 7.0, 3480, 141, zoneSec = listOf(240, 2400, 720, 120, 0)), isNew = false); rule.waitForIdle()
         rule.onNodeWithText("Kept it easy. That's the work.").assertExists(); shot("moment-done")
+    }
+
+    @Test @Config(qualifiers = "w400dp-h900dp-xhdpi") fun paceImprovementIsNoticedOnce() {
+        val vm = seeded()
+        rule.setContent { AppTheme { App(vm) } }
+        rule.waitForIdle()
+        val first = vm.settings.seenPace
+        assertTrue(first > 0)                                                      // the home screen remembered what it showed
+        vm.saveRun(Run("fast", today, "easy", 6.5, 2990, 142), isNew = false); rule.waitForIdle()
+        assertTrue(vm.settings.seenPace < first)                                   // and moved on once the faster pace was shown
     }
 
     @Test @Config(qualifiers = "w400dp-h1100dp-xhdpi") fun suggestionIsOfferedAndApplied() {
@@ -120,19 +137,17 @@ class ScreensTest {
         val mon = mondayOf(today)
         for (w in 1L..4L) for ((d, start) in listOf(0L to 1140, 3L to 1155, 5L to 1125))
             vm.saveRun(Run("h$w$d", mon.minusWeeks(w).plusDays(d), "easy", 6.0, 2700, 142, startMin = start), isNew = false)
-        vm.toast = null; vm.clock = java.time.LocalTime.of(18, 0)
+        vm.toast = null; vm.clock = LocalTime.of(18, 0)
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("Move Tuesday's run to Monday?").assertExists(); shot("suggestion")
         rule.onNodeWithText("Move it").performClick(); rule.waitForIdle()
         assertEquals(listOf(1, 4, 6, 7), vm.settings.days)
         rule.onNodeWithText("Move Tuesday's run to Monday?").assertDoesNotExist()
-        shot("suggestion-applied")
     }
 
     @Test @Config(qualifiers = "w400dp-h1500dp-xhdpi") fun liveRunScreens() {
         val vm = seeded()
         vm.updateSettings { it.copy(days = (1..7).toList()) }
-        vm.clock = java.time.LocalTime.of(18, 0)
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("Start run").performClick(); rule.waitForIdle()
         rule.onNodeWithText("GUIDED RUN").assertExists(); shot("live-briefing")
@@ -146,17 +161,18 @@ class ScreensTest {
 
     @Test @Config(qualifiers = "w400dp-h1700dp-xhdpi") fun swapASessionAndSwitchToMiles() {
         val vm = seeded()
+        vm.updateSettings { it.copy(days = (1..7).toList()) }
         rule.setContent { AppTheme { App(vm) } }
-        rule.onNodeWithText("PLAN").performClick(); rule.waitForIdle()
-        rule.onAllNodesWithText("Change")[0].performClick(); rule.waitForIdle()
+        tab("Plan")
+        rule.onNodeWithText("What you'll do").performClick(); rule.waitForIdle(); shot("plan-blocks")
+        rule.onNodeWithText("Change").performClick(); rule.waitForIdle()
         rule.onNodeWithText("Run-walk").performClick(); rule.waitForIdle()
-        assertEquals(1, vm.settings.overrides.size); assertEquals("runwalk", vm.settings.overrides.values.first())
-        shot("plan-swapped")
+        assertEquals(mapOf(today to "runwalk"), vm.settings.overrides)
+        rule.onNodeWithText("Easy run-walk").assertExists()
         try {
             vm.updateSettings { it.copy(miles = true, raceName = "City Half", raceDate = today.plusDays(40), raceKm = 21.1) }
-            rule.onNodeWithText("TODAY").performClick(); rule.waitForIdle()
+            tab("Today")
             rule.onNodeWithText("City Half · 13.1 mi").assertExists(); shot("today-miles-race")
-            rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Settings").performClick(); rule.waitForIdle(); shot("setup")
         } finally { U.miles = false }
     }
 
@@ -166,46 +182,34 @@ class ScreensTest {
         assertEquals(1, h.size); assertEquals(29.5 to 21.0, h["2026-11-17T18"])
     }
 
-    @Test fun lessonEarnsXp() {
+    @Test fun lessonCanBeFinished() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
-        rule.onNodeWithContentDescription("Settings").performClick(); rule.onNodeWithText("Learn").performClick()
+        cog("Learn")
         rule.onNodeWithText("Why not hard every day?").performClick(); rule.waitForIdle(); shot("lesson-card")
         rule.onNodeWithText("Next").performClick(); rule.onNodeWithText("Next").performClick(); rule.onNodeWithText("Quick question").performClick()
         rule.onNodeWithText("It is too slow to count").performClick(); rule.waitForIdle()
         rule.onNodeWithText("It tires you without the payoff of a real hard session").performClick(); rule.waitForIdle(); shot("lesson-question")
-        val before = vm.engine().game.xp
-        rule.onNodeWithText("Finish · +40 XP").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Finish").performClick(); rule.waitForIdle()
         assertTrue("grey" in vm.settings.lessonsDone)
-        assertEquals(before + 40, vm.engine().game.xp)
     }
 
-    @Test fun guideThenFirstRunEarnsReward() {
+    @Test fun guideThenFirstRunIsCelebrated() {
         val vm = AppVM(ApplicationProvider.getApplicationContext())
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("Skip").performClick(); rule.waitForIdle()
-        shot("guide-age")
         rule.onNodeWithText("Next").performClick()                                   // age 30
-        rule.waitForIdle(); shot("guide-rest")
         rule.onNodeWithText("Next").performClick()                                   // resting 60
         rule.onNodeWithText("Yes, I know a pace and heart rate").performClick()
-        rule.waitForIdle(); shot("guide-now")
         rule.onNodeWithText("Next").performScrollTo().performClick()                 // 8:00 at 150 bpm
         rule.waitForIdle()
         rule.onNodeWithText("7:25 /km · Ambitious").performClick()
-        rule.waitForIdle(); shot("guide-target")
         rule.onNodeWithText("Next").performClick()
-        rule.waitForIdle(); shot("guide-level")
         rule.onNodeWithText("Just starting").performClick()
-        rule.waitForIdle(); shot("guide-days")
         rule.onNodeWithText("Next").performClick()
-        rule.waitForIdle(); shot("guide-long")
         rule.onNodeWithText("Sunday").performClick()
-        rule.waitForIdle(); shot("guide-commit")
         rule.onNodeWithText("12 weeks · A new habit").performClick()
-        rule.waitForIdle(); shot("guide-remind")
         rule.onNodeWithText("Not now").performClick()
-        rule.waitForIdle(); shot("guide-safe")
         rule.onNodeWithText("I understand").performClick()
         rule.waitForIdle(); shot("guide-plan")
         rule.onNodeWithText("Start training").performScrollTo().performClick()
@@ -218,13 +222,12 @@ class ScreensTest {
         assertEquals(12, vm.settings.goalWeeks)
         shot("today-new-user")
 
-        rule.onNodeWithText("PROGRESS").performClick()
+        tab("Progress")
         rule.onNodeWithText("Runs").performClick()
         rule.onNodeWithText("Add run").performClick()
         rule.onNodeWithText("Distance (km)").performTextInput("6")
         rule.onNodeWithText("Time").performTextInput("54:00")
         rule.onNodeWithText("Average HR").performTextInput("138")
-        rule.waitForIdle(); shot("run-form")
         rule.onNodeWithText("Save run").performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals(1, vm.data.runs.size)

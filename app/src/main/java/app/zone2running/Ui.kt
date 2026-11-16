@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -22,6 +24,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -107,11 +110,12 @@ fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> 
 fun Btn(text: String, modifier: Modifier = Modifier, ghost: Boolean = false, danger: Boolean = false, small: Boolean = false, onClick: () -> Unit) {
     val p = LocalPal.current
     val shape = RoundedCornerShape(10.dp)
+    val tick = haptic()
     val bg = if (ghost || danger) Color.Transparent else p.accent
     val fg = when { danger -> p.danger; ghost -> p.ink; else -> p.accentInk }
     Box(
         modifier.clip(shape).background(bg).then(if (ghost || danger) Modifier.border(1.dp, p.line, shape) else Modifier)
-            .clickable(onClick = onClick).padding(horizontal = if (small) 12.dp else 16.dp, vertical = if (small) 8.dp else 12.dp),
+            .clickable { tick(false); onClick() }.padding(horizontal = if (small) 12.dp else 16.dp, vertical = if (small) 8.dp else 12.dp),
         contentAlignment = Alignment.Center,
     ) { Text(text, color = fg, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = if (small) 14.sp else 15.sp) }
 }
@@ -141,9 +145,10 @@ fun Field(label: String, value: String, modifier: Modifier = Modifier, placehold
 fun Pick(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val p = LocalPal.current
     val shape = RoundedCornerShape(9.dp)
+    val tick = haptic()
     Box(
         modifier.clip(shape).background(if (on) p.accent else p.surface2).border(1.dp, if (on) p.accent else p.line, shape)
-            .clickable(onClick = onClick).padding(vertical = 9.dp, horizontal = 4.dp),
+            .clickable { tick(false); onClick() }.padding(vertical = 9.dp, horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) { Text(text, color = if (on) p.accentInk else p.ink, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1) }
 }
@@ -205,18 +210,6 @@ fun Medal(b: Badge, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
 @Composable
 fun Dot(color: Color) = Box(Modifier.size(10.dp).clip(CircleShape).background(color))
 
-@Composable
-fun LevelBar(g: Game, modifier: Modifier = Modifier) {
-    val p = LocalPal.current
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("Level ${g.level} · ${levelName(g.level)}", Modifier.weight(1f), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = p.ink)
-            Text("${g.xp} / ${g.hi} XP", fontSize = 13.sp, color = p.muted, fontFamily = BodyFont)
-        }
-        Meter(((g.xp - g.lo).toFloat() / (g.hi - g.lo)).coerceAtLeast(.02f))
-    }
-}
-
 /** Flame used for the weekly streak, drawn so it needs no icon dependency. */
 @Composable
 fun Flame(color: Color, modifier: Modifier = Modifier) {
@@ -237,3 +230,116 @@ fun Flame(color: Color, modifier: Modifier = Modifier) {
 }
 
 fun Offset.plusY(dy: Float) = Offset(x, y + dy)
+
+/** A light tick for taps and drags, a firmer one for milestones. */
+@Composable
+fun haptic(): (strong: Boolean) -> Unit {
+    val h = androidx.compose.ui.platform.LocalHapticFeedback.current
+    return { strong -> h.performHapticFeedback(if (strong) androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress else androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) }
+}
+
+/** The app's own small icons, drawn as strokes so they match the type and need no icon library. */
+@Composable
+fun Glyph(name: String, color: Color, modifier: Modifier = Modifier.size(22.dp)) {
+    Canvas(modifier) {
+        val s = size.minDimension; val w = s * .09f
+        val st = Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(color, Offset(x1 * s, y1 * s), Offset(x2 * s, y2 * s), w, androidx.compose.ui.graphics.StrokeCap.Round)
+        fun poly(vararg p: Float, close: Boolean = false, fill: Boolean = false) {
+            val path = androidx.compose.ui.graphics.Path().apply { moveTo(p[0] * s, p[1] * s); for (i in 2 until p.size step 2) lineTo(p[i] * s, p[i + 1] * s); if (close) close() }
+            if (fill) drawPath(path, color) else drawPath(path, color, style = st)
+        }
+        when (name) {
+            "heart" -> drawPath(heartPath(s / 100f * .86f, s * .07f, s * .05f), color, style = st)
+            "calendar" -> { drawRoundRect(color, Offset(s * .14f, s * .2f), Size(s * .72f, s * .66f), CornerRadius(s * .12f), style = st); line(.14f, .42f, .86f, .42f); line(.34f, .1f, .34f, .26f); line(.66f, .1f, .66f, .26f) }
+            "chart" -> { poly(.12f, .72f, .36f, .48f, .54f, .6f, .88f, .22f); poly(.66f, .22f, .88f, .22f, .88f, .44f) }
+            "check" -> poly(.2f, .54f, .42f, .74f, .8f, .28f)
+            "snow" -> { line(.5f, .14f, .5f, .86f); line(.19f, .32f, .81f, .68f); line(.19f, .68f, .81f, .32f) }
+            "moon" -> drawPath(androidx.compose.ui.graphics.Path.combine(androidx.compose.ui.graphics.PathOperation.Difference,
+                androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(s * .16f, s * .14f, s * .86f, s * .84f)) },
+                androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(s * .38f, s * .06f, s * 1.0f, s * .68f)) }), color)
+            "dash" -> line(.3f, .5f, .7f, .5f)
+            "dot" -> drawCircle(color, s * .09f)
+            "right" -> poly(.4f, .24f, .66f, .5f, .4f, .76f)
+            "left" -> poly(.6f, .24f, .34f, .5f, .6f, .76f)
+            "down" -> poly(.24f, .4f, .5f, .66f, .76f, .4f)
+            "bolt" -> poly(.56f, .08f, .24f, .56f, .48f, .56f, .42f, .92f, .76f, .42f, .52f, .42f, close = true, fill = true)
+            "flag" -> { line(.26f, .12f, .26f, .9f); poly(.26f, .16f, .8f, .28f, .26f, .52f, close = true, fill = true) }
+            "target" -> { drawCircle(color, s * .38f, style = st); drawCircle(color, s * .2f, style = st); drawCircle(color, s * .06f) }
+            "road" -> drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(s * .2f, s * .88f); cubicTo(s * .2f, s * .5f, s * .8f, s * .56f, s * .78f, s * .12f) }, color, style = st)
+            "bars" -> { line(.2f, .84f, .2f, .56f); line(.4f, .84f, .4f, .2f); line(.6f, .84f, .6f, .56f); line(.8f, .84f, .8f, .2f) }
+            "ramp" -> poly(.12f, .78f, .36f, .78f, .58f, .3f, .88f, .3f)
+            "walk" -> { line(.1f, .5f, .42f, .5f); line(.56f, .5f, .64f, .5f); line(.78f, .5f, .9f, .5f) }
+            "dumbbell" -> { line(.34f, .5f, .66f, .5f); line(.27f, .28f, .27f, .72f); line(.14f, .38f, .14f, .62f); line(.73f, .28f, .73f, .72f); line(.86f, .38f, .86f, .62f) }
+            "play" -> poly(.34f, .2f, .8f, .5f, .34f, .8f, close = true, fill = true)
+            "plus" -> { line(.5f, .2f, .5f, .8f); line(.2f, .5f, .8f, .5f) }
+            "bell" -> { drawArc(color, 180f, 180f, false, Offset(s * .24f, s * .16f), Size(s * .52f, s * .6f), style = st); line(.24f, .46f, .24f, .7f); line(.76f, .46f, .76f, .7f); line(.16f, .72f, .84f, .72f); drawCircle(color, s * .06f, Offset(s * .5f, s * .86f)) }
+            "book" -> { drawRoundRect(color, Offset(s * .18f, s * .16f), Size(s * .64f, s * .68f), CornerRadius(s * .08f), style = st); line(.36f, .36f, .64f, .36f); line(.36f, .54f, .64f, .54f) }
+        }
+    }
+}
+
+/** Which icon stands for a session kind. */
+fun glyphFor(kind: String) = when (kind) {
+    "long" -> "road"; "tempo" -> "ramp"; "4x4", "6x3", "intervals" -> "bars"; "test" -> "target"; "runwalk" -> "walk"
+    "strides" -> "bolt"; "race" -> "flag"; "rest" -> "moon"; "strength" -> "dumbbell"; else -> "heart"
+}
+
+/** A session's picture: its icon on a soft disc, tinted by how hard the session is. */
+@Composable
+fun SessionArt(kind: String, modifier: Modifier = Modifier.size(44.dp), done: Boolean = false) {
+    val p = LocalPal.current
+    val hard = kind in setOf("tempo", "4x4", "6x3", "intervals", "race")
+    val quiet = kind == "rest" || kind == "strength"
+    val bg = when { done -> p.accent; hard -> p.warnBg; quiet -> p.surface2; else -> p.goodBg }
+    val fg = when { done -> p.accentInk; hard -> p.warnInk; quiet -> p.muted; else -> p.goodInk }
+    Box(modifier.clip(CircleShape).background(bg), contentAlignment = Alignment.Center) { Glyph(if (done) "check" else glyphFor(kind), fg, Modifier.fillMaxSize(.52f)) }
+}
+
+/** A row that says one thing and opens to say the rest. */
+@Composable
+fun Fold(glyph: String, title: String, summary: String, startOpen: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val p = LocalPal.current
+    val tick = haptic()
+    var open by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(startOpen) }
+    val turn = animFloat(if (open) 180f else 0f, 220)
+    Column {
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { tick(false); open = !open }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Glyph(glyph, p.muted, Modifier.size(22.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = p.ink)
+                if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 13.5.sp, lineHeight = 18.sp, color = p.muted, maxLines = if (open) 6 else 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Glyph("down", p.muted, Modifier.size(18.dp).graphicsLayerRotate(turn))
+        }
+        androidx.compose.animation.AnimatedVisibility(open) { Column(Modifier.padding(start = 34.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
+    }
+}
+
+fun Modifier.graphicsLayerRotate(deg: Float) = this.then(Modifier.graphicsLayer { rotationZ = deg })
+
+/** A row that goes somewhere. */
+@Composable
+fun Link(glyph: String, title: String, summary: String, onClick: () -> Unit) {
+    val p = LocalPal.current
+    val tick = haptic()
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { tick(false); onClick() }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Glyph(glyph, p.muted, Modifier.size(22.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = p.ink)
+            if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 13.5.sp, lineHeight = 18.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
+        Glyph("right", p.muted, Modifier.size(18.dp))
+    }
+}
+
+/** Where the time went: one bar, five zones. */
+@Composable
+fun ZoneBar(zoneSec: List<Int>, modifier: Modifier = Modifier) {
+    val p = LocalPal.current
+    val tot = zoneSec.sum().toFloat()
+    val grow = enter(700, 150)
+    Row(modifier.fillMaxWidth(grow.coerceAtLeast(.02f)).height(14.dp).clip(RoundedCornerShape(7.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        zoneSec.forEachIndexed { i, sec -> if (sec > 0) Box(Modifier.weight(sec / tot).fillMaxHeight().background(p.zones[i])) }
+    }
+}

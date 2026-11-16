@@ -17,7 +17,7 @@ What you get
 • Your Zone 2 pace over time, with a plain note on how solid the estimate is
 • A home screen that changes through the day: the session in the morning, the result after your run
 • Nine two-minute lessons on easy running
-• Weekly streaks that forgive a missed week, quests, levels and badges, all optional
+• Weekly streaks that forgive a missed week, quests and badges, all optional
 • Race goal with taper, kilometre splits, heat adjustment, miles or kilometres
 
 Private by design

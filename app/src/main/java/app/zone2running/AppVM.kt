@@ -16,7 +16,7 @@ import kotlin.math.abs
 
 /** What the reward screen shows after new runs land. */
 data class Celebration(
-    val title: String, val xp: Int, val game: Game, val newBadges: List<Badge>, val records: List<String>,
+    val title: String, val game: Game, val newBadges: List<Badge>, val records: List<String>,
     val message: String, val summary: String, val estLine: String?, val streakLine: String, val streakOn: Boolean,
     val share: String, val celebrate: Boolean,
     val run: Run, val zone: Int, val current: Double?, val target: Int, val streakMilestone: Int,
@@ -26,7 +26,6 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     val r = fresh.maxBy { it.date }
     val g0 = before.game; val g = after.game
     val nb = g.badges.filter { b -> b.got && g0.badges.none { it.id == b.id && it.got } }
-    val up = g.level > g0.level
     val recs = ArrayList<String>()
     if (g0.longest > 0 && g.longest > g0.longest) recs += "Longest run: ${U.dist(g.longest)}"
     if (g0.bestEst != null && g.bestEst != null && g.bestEst < g0.bestEst - .5) recs += "Best Zone 2 estimate: ${fmtPace(g.bestEst)} ${U.per}"
@@ -44,7 +43,6 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     val streakLine = if (w.hit) "Weekly goal hit. Streak: ${g.streak} week${if (g.streak == 1) "" else "s"}." else "${w.n} of ${w.need} runs toward this week's streak."
     val title = when {
         fresh.size > 1 -> "${fresh.size} runs imported"
-        up -> "Level ${g.level} reached: ${levelName(g.level)}"
         nb.isNotEmpty() -> "Badge unlocked"
         recs.isNotEmpty() -> "New personal record"
         else -> "Good work"
@@ -52,11 +50,11 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     val share = buildString {
         append("Zone 2 Running · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}\n$summary\n")
         after.current?.let { append("Zone 2 pace now ${fmtPace(it)} ${U.per}, target ${fmtPace(after.s.targetPace.toDouble())}\n") }
-        append("Level ${g.level} ${levelName(g.level)} · ${g.streak} week streak")
+        append("${g.streak} week streak")
         if (nb.isNotEmpty()) append("\nUnlocked: " + nb.joinToString { it.name })
     }
-    return Celebration(title, g.xp - g0.xp, g, nb, recs, msg, summary, after.est(r)?.let { "Zone 2 estimate from this run: ${fmtPace(it)} ${U.per}" },
-        streakLine, g.streak > 0, share, up || nb.isNotEmpty() || recs.isNotEmpty(),
+    return Celebration(title, g, nb, recs, msg, summary, after.est(r)?.let { "Zone 2 estimate from this run: ${fmtPace(it)} ${U.per}" },
+        streakLine, g.streak > 0, share, nb.isNotEmpty() || recs.isNotEmpty() || g.streak > g0.streak,
         r, z, after.current, after.s.targetPace, if (g.streak > g0.streak && g.streak in setOf(4, 8, 12, 26, 52)) g.streak else 0)
 }
 
@@ -194,7 +192,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun finishLesson(id: String) {
-        if (id !in settings.lessonsDone) { updateSettings { it.copy(lessonsDone = it.lessonsDone + id) }; toast = "Lesson complete · +40 XP" }
+        if (id !in settings.lessonsDone) { updateSettings { it.copy(lessonsDone = it.lessonsDone + id) }; toast = "Lesson complete" }
     }
 
     /** Marks or unmarks a week as time off. Break weeks never break the streak. */
@@ -219,6 +217,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     /** "Not now": the same suggestion stays away for four weeks. */
     fun snooze(sg: Suggestion) = updateSettings { it.copy(snoozed = it.snoozed + (sg.key to LocalDate.now())) }
+
+    /** Pull-to-refresh on the home screen: bring in new runs, and re-read the time of day. */
+    fun pulled() {
+        clock = java.time.LocalTime.now()
+        if (healthGranted) importHealth(manual = true) else toast = "Connect Health Connect in Settings to import runs"
+    }
 
     fun stopBackups() = updateSettings { it.copy(backupTree = "", lastBackup = "") }
 }

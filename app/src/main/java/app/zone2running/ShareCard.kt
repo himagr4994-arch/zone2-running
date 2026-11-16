@@ -62,8 +62,7 @@ object ShareCard {
             cv.drawRoundRect(RectF(m + (w - 2 * m) * frac - 8, 1042f, m + (w - 2 * m) * frac + 8, 1102f), 8f, 8f, paint(mark, 0f, body))
         }
         val g = c.game
-        cv.drawText("Level ${g.level} · ${levelName(g.level)}", m, 1230f, paint(ink, 50f, semi))
-        cv.drawText(if (g.streak > 0) "${g.streak}-week streak" else "+${c.xp} XP", w - m, 1230f, paint(mark, 50f, semi, Paint.Align.RIGHT))
+        cv.drawText(if (g.streak > 0) "${g.streak}-week streak" else "${g.badges.count { it.got }} badges earned", m, 1230f, paint(mark, 50f, semi))
         cv.drawText("Easy running, measured.", m, 1290f, paint(muted, 32f, body))
         return bmp
     }

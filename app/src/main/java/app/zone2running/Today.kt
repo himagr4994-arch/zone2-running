@@ -1,220 +1,218 @@
 package app.zone2running
 
+import android.graphics.Paint
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/** The one main action on a screen: full width, tall, with an optional icon. */
 @Composable
-fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Unit, openLesson: (Lesson) -> Unit, openLive: (Session) -> Unit, openForm: (FormSeed) -> Unit) {
+fun BigBtn(text: String, glyph: String? = null, ghost: Boolean = false, onClick: () -> Unit) {
+    val p = LocalPal.current
+    val tick = haptic()
+    val shape = RoundedCornerShape(16.dp)
+    Row(Modifier.fillMaxWidth().clip(shape).background(if (ghost) Color.Transparent else p.accent).then(if (ghost) Modifier.border(1.dp, p.line, shape) else Modifier)
+        .clickable { tick(false); onClick() }.padding(vertical = 16.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        if (glyph != null) { Glyph(glyph, if (ghost) p.ink else p.accentInk, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)) }
+        Text(text, color = if (ghost) p.ink else p.accentInk, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1)
+    }
+}
+
+@Composable
+fun TextLink(text: String, onClick: () -> Unit) {
+    val tick = haptic()
+    Text(text, Modifier.clip(RoundedCornerShape(8.dp)).clickable { tick(false); onClick() }.padding(horizontal = 10.dp, vertical = 8.dp),
+        color = LocalPal.current.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+}
+
+/** Home: Dil's one line, the pace, one button. Everything else is a row underneath that opens when tapped. */
+@Composable
+fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Unit, openLesson: (Lesson) -> Unit, openLive: (Session) -> Unit, openRun: (Run) -> Unit, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
     val game = vm.settings.gameOn
     val lead = remember(e, vm.clock) { e.lead(vm.clock) }
     val nextLesson = LESSONS.firstOrNull { it.id !in vm.settings.lessonsDone }
-    var k = 0
+    var details by rememberSaveable { mutableStateOf(false) }
+    val c = e.current; val seen = vm.settings.seenPace
+    val improved = c != null && seen > 0 && c < seen - 3
 
-    // 1. The lead: one answer for this moment of the day.
-    Column(Modifier.rise(k++).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.surface).border(1.dp, p.line, RoundedCornerShape(18.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Dil(lead.mood, Modifier.size(84.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Label(lead.eyebrow)
-                Text(lead.title, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 29.sp, color = p.ink)
+    Row(Modifier.rise(0), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Dil(if (improved) "proud" else lead.mood, Modifier.size(84.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Label(lead.eyebrow)
+            Text(lead.title, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 29.sp, color = p.ink)
+        }
+    }
+
+    Box(Modifier.rise(1)) { PaceHero(vm, e, improved) }
+
+    Column(Modifier.rise(2), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val hasAction = lead.cta.isNotEmpty()
+        when {
+            hasAction -> {
+                BigBtn("Start run", "play") { openLive(lead.session ?: Session("easy", "Easy run", 20, "Keep HR ${e.zb[1]}–${e.zb[2] - 1} bpm. You should be able to speak full sentences.")) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    TextLink("Log it instead") { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
+                    TextLink(if (details) "Hide details" else "Details") { details = !details }
+                }
+            }
+            lead.kind == "rest" && nextLesson != null -> BigBtn("2-minute lesson", "book") { openLesson(nextLesson) }
+            else -> BigBtn("See plan", "calendar", ghost = true, onClick = openPlan)
+        }
+        AnimatedVisibility(details || !hasAction) {
+            Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(lead.body, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
+                lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let {
+                    val slow = 1 + lead.heatPct / 100
+                    Small("Cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first * slow)}–${fmtPace(it.second * slow)} ${U.per}.")
+                }
             }
         }
-        Text(lead.body, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
-        lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let {
-            val slow = 1 + lead.heatPct / 100
-            Small("Heart rate cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first * slow)}–${fmtPace(it.second * slow)} ${U.per}, but go by heart rate.")
-        }
-        lead.run?.let { RunFacts(it, e) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (lead.cta.isNotEmpty()) {
-                // Start a guided run now, or log one that already happened.
-                Btn("Start run") { openLive(lead.session ?: Session("easy", "Easy run", 20, "Keep HR ${e.zb[1]}–${e.zb[2] - 1} bpm. You should be able to speak full sentences.")) }
-                Btn("Log it", ghost = true) { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
-            }
-            if (lead.kind == "rest" && nextLesson != null) Btn("2-minute lesson", ghost = lead.cta.isNotEmpty()) { openLesson(nextLesson) }
-            if (lead.kind == "plan" || lead.kind == "rest" || lead.kind == "done") Btn("Plan", ghost = true, onClick = openPlan)
-        }
     }
 
-    vm.update?.let { (version, url) ->
-        val ctx = androidx.compose.ui.platform.LocalContext.current
-        Panel { Label("Update"); Body("Version $version is out. Installing it keeps your data."); Btn("See what's new", small = true) { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } } }
-    }
-
-    e.raceDaysLeft?.let { left ->
-        Panel(Modifier.rise(k++)) {
-            Row { Label("Race goal"); Spacer(Modifier.weight(1f)); Small(when (left) { 0 -> "today"; 1 -> "tomorrow"; else -> "in $left days" }) }
-            Head("${e.s.raceName.ifBlank { "Your race" }} · ${U.dist(e.s.raceKm, 1)}", 20)
-            Small(e.racePrediction()?.let { "Your hardest recent run points to about ${fmtDur(it)}. The plan tapers over the last two weeks." } ?: "Log one hard run and a projected time appears here. The plan tapers over the last two weeks.")
-        }
-    }
-
-    // 2. One thing Dil noticed in your habits, offered and never applied without a yes.
+    // Offered, never applied without a yes.
     e.suggestions().firstOrNull()?.let { sg ->
         val ctx = androidx.compose.ui.platform.LocalContext.current
         val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> if (ok) vm.accept(sg) else vm.snooze(sg) }
-        Panel(Modifier.rise(k++)) {
+        Panel(Modifier.rise(3)) {
             Label("Dil noticed")
             Head(sg.title, 20)
-            Body(sg.body)
+            Small(sg.body)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Btn(sg.yes, small = true) {
-                    if (sg.act is Remind && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else vm.accept(sg)
-                }
+                Btn(sg.yes, small = true) { if (sg.act is Remind && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else vm.accept(sg) }
                 Btn("Not now", ghost = true, small = true) { vm.snooze(sg) }
             }
         }
     }
 
-    val mon = mondayOf(e.today)
-    val heroCard: @Composable () -> Unit = { Box(Modifier.rise(k++)) { Hero(e) } }
-    val weekCard: @Composable () -> Unit = { WeekCard(e, game, Modifier.rise(k++)) }
-    // After a run, the week is the next thing worth seeing; otherwise the pace is.
-    if (lead.kind == "done" || lead.kind == "risk") { weekCard(); heroCard() } else { heroCard(); weekCard() }
+    Column(Modifier.rise(4)) {
+        val mon = mondayOf(e.today)
+        val wk = e.weekHit(mon)
+        val two = e.span(e.today.minusDays(13), e.today.plusDays(1))
+        val share = (two.easy + two.hard).takeIf { it > 0 }?.let { (two.easy / it * 100).roundToInt() }
+        WeekDots(e, mon)
+        Fold("calendar", "This week", "${wk.n} of ${wk.planned} runs" + (share?.let { " · $it% easy" } ?: "") + " · ${(wk.s.easy + wk.s.hard).roundToInt()} min") { WeekDetail(e, game, wk, share) }
 
-    // The last run, when it isn't already the lead.
-    e.runs.lastOrNull()?.takeIf { lead.run == null }?.let { r ->
-        Panel(Modifier.rise(k++)) {
-            Row { Label("Last run"); Spacer(Modifier.weight(1f)); Small("${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}") }
-            RunFacts(r, e)
+        vm.update?.let { (version, url) ->
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            Link("plus", "Version $version is out", "Installing it keeps your data") { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } }
         }
-    }
-
-    val rv = e.review()
-    if (rv != null && e.today.dayOfWeek.value <= 2 && lead.kind != "review") Panel(Modifier.rise(k++)) {
-        Label("Last week in review")
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Stat("${rv.n}/${rv.planned}", "runs"); Stat(f1(U.k(rv.km)), U.unit); Stat(rv.easyShare?.let { "$it%" } ?: "–", "easy")
-        }
-        NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line))
-    }
-
-    if (nextLesson != null && lead.kind != "rest") Panel(Modifier.rise(k++)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Label("Two-minute lesson" + if (game) " · 40 XP" else "")
-                Head(nextLesson.title, 18)
+        e.raceDaysLeft?.let { left ->
+            Fold("flag", "${e.s.raceName.ifBlank { "Your race" }} · ${U.dist(e.s.raceKm, 1)}", when (left) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "In $left days" } + (e.racePrediction()?.let { " · about ${fmtDur(it)}" } ?: "")) {
+                Small(if (e.racePrediction() != null) "Projected from your hardest recent run. The plan tapers over the last two weeks." else "Log one hard run and a projected time appears. The plan tapers over the last two weeks.")
             }
-            Btn("Start", ghost = true, small = true) { openLesson(nextLesson) }
         }
+        e.runs.lastOrNull()?.let { r ->
+            val easyShare = r.zoneSec.takeIf { it.size == 5 && it.sum() > 0 }?.let { " · ${((it[0] + it[1]) * 100f / it.sum()).roundToInt()}% in Zone 2" } ?: ""
+            Link("road", if (r.date == e.today) "Today's run" else "Last run · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}", "${U.dist(r.distKm)} · ${fmtPace(paceOf(r))} ${U.per}$easyShare") { openRun(r) }
+        }
+        e.review()?.takeIf { e.today.dayOfWeek.value <= 2 }?.let { rv ->
+            Fold("chart", "Last week", "${rv.n} of ${rv.planned} runs · ${U.dist(rv.km, 1)}" + (rv.easyShare?.let { " · $it% easy" } ?: "")) { NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line)) }
+        }
+        if (nextLesson != null && !(lead.kind == "rest")) Link("book", "Two-minute lesson", nextLesson.title) { openLesson(nextLesson) }
+        val notes = e.coach()
+        if (notes.isNotEmpty() && e.runs.isNotEmpty()) Fold("bolt", "Coach notes", notes.first().text) { notes.forEach { NoteBox(it) } }
+        if (vm.health.available() && !vm.healthGranted) Link("plus", "Import runs automatically", "Connect Health Connect in Settings", openSetup)
     }
-
-    if (vm.health.available() && !vm.healthGranted) Panel {
-        Label("Skip the typing")
-        Body("Connect Health Connect and runs recorded by your watch app are imported automatically, with distance, time and heart rate.")
-        Btn("Set up in Setup", ghost = true, small = true, onClick = openSetup)
-    }
-
-    val notes = e.coach().take(2)
-    if (notes.isNotEmpty() && e.runs.isNotEmpty()) Panel { Label("Coach notes"); notes.forEach { NoteBox(it) } }
 }
 
-/** A run in three numbers, plus where the heart rate actually sat. */
+/** Seven days at a glance: done, still to come, missed, rest. */
 @Composable
-fun RunFacts(r: Run, e: Engine) {
+private fun WeekDots(e: Engine, mon: LocalDate) {
     val p = LocalPal.current
-    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Stat(f2(U.k(r.distKm)), U.unit); Stat(fmtDur(r.durSec), "time"); Stat(fmtPace(paceOf(r)), U.per); if (r.avgHr > 0) Stat("${r.avgHr}", "bpm")
-    }
-    val tot = r.zoneSec.sum()
-    if (r.zoneSec.size == 5 && tot > 0) {
-        val grow = enter(700, 200)
-        Row(Modifier.fillMaxWidth(grow.coerceAtLeast(.02f)).height(14.dp).clip(RoundedCornerShape(7.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            r.zoneSec.forEachIndexed { i, sec -> if (sec > 0) Box(Modifier.weight(sec.toFloat() / tot).fillMaxHeight().background(p.zones[i])) }
-        }
-        val easy = r.zoneSec[0] + r.zoneSec[1]
-        Small("${easy / 60} of ${tot / 60} minutes in Zone 2 or below (${(easy * 100f / tot).roundToInt()}%).", p.ink)
-    } else if (r.avgHr > 0) {
-        val z = e.zoneOf(r.avgHr)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Dot(p.zones[z - 1]); Small("Averaged Zone $z. Import runs through Health Connect to see minutes in each zone.", p.ink)
-        }
-    }
-    e.est(r)?.let { Small("Zone 2 estimate from this run: ${fmtPace(it)} ${U.per}") }
-}
-
-@Composable
-private fun WeekCard(e: Engine, game: Boolean, modifier: Modifier) {
-    val p = LocalPal.current
-    val mon = mondayOf(e.today)
-    val wk = e.weekHit(mon)
-    val two = e.span(e.today.minusDays(13), e.today.plusDays(1))
-    val share = (two.easy + two.hard).takeIf { it > 0 }?.let { (two.easy / it * 100).roundToInt() }
-    Panel(modifier) {
-        Label("This week")
-        val grow = enter(1000, 250)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Canvas(Modifier.size(104.dp)) {
-                val w = 9.dp.toPx()
-                fun ring(inset: Float, frac: Float, color: Color) {
-                    val tl = Offset(inset, inset); val sz = Size(size.width - 2 * inset, size.height - 2 * inset)
-                    drawArc(p.surface2, 0f, 360f, false, tl, sz, style = Stroke(w))
-                    if (frac > 0f) drawArc(color, -90f, 360f * min(1f, frac) * grow, false, tl, sz, style = Stroke(w, cap = StrokeCap.Round))
+    val plan = e.weekPlan(mon)
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        for (i in 0..6) {
+            val d = mon.plusDays(i.toLong()); val ses = plan.ses[i + 1]; val ran = e.runsOn(d).isNotEmpty(); val today = d == e.today
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(DOW[i].take(1), fontSize = 12.sp, fontFamily = BodyFont, fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.ink else p.muted)
+                Box(Modifier.size(30.dp).clip(CircleShape).background(if (ran) p.accent else Color.Transparent)
+                    .then(when { ran -> Modifier; ses != null && d.isBefore(e.today) -> Modifier.border(2.dp, p.warnInk.copy(alpha = .5f), CircleShape); ses != null -> Modifier.border(2.dp, if (today) p.ink else p.line, CircleShape); else -> Modifier }),
+                    contentAlignment = Alignment.Center) {
+                    when { ran -> Glyph("check", p.accentInk, Modifier.size(16.dp)); ses == null -> Glyph("dot", p.line, Modifier.size(16.dp)) }
                 }
-                ring(w / 2 + 2.dp.toPx(), if (wk.planned > 0) wk.n.toFloat() / wk.planned else 0f, p.accent)
-                ring(w * 1.5f + 7.dp.toPx(), (share ?: 0) / 80f, p.gold)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RingLine(p.accent, "${wk.n} of ${wk.planned}", "sessions",
-                    if (!game) "" else if (wk.hit) "Streak safe for this week" else (wk.need - wk.n).let { "$it more ${if (it == 1) "run keeps" else "runs keep"} your streak" })
-                RingLine(p.gold, share?.let { "$it%" } ?: "–", "easy, last 14 days", "Fill the ring at 80%")
-                val mins = (wk.s.easy + wk.s.hard).roundToInt()
-                RingLine(null, "$mins min", "so far", e.usualWeekMinutes()?.let { "Your usual week is $it min" } ?: "${U.dist(wk.s.km, 1)}")
-            }
-        }
-        if (game) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-            Row { Label("Weekly quests"); Spacer(Modifier.weight(1f)); Small("50 XP each") }
-            e.quests(mon).forEach { q -> QuestRow(q) }
         }
     }
 }
 
 @Composable
-private fun Stat(big: String, label: String) {
-    Column { Text(big, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, color = LocalPal.current.ink); Small(label) }
+private fun WeekDetail(e: Engine, game: Boolean, wk: WeekHit, share: Int?) {
+    val p = LocalPal.current
+    val grow = enter(900, 100)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Canvas(Modifier.size(92.dp)) {
+            val w = 9.dp.toPx()
+            fun ring(inset: Float, frac: Float, color: Color) {
+                val tl = Offset(inset, inset); val sz = Size(size.width - 2 * inset, size.height - 2 * inset)
+                drawArc(p.surface2, 0f, 360f, false, tl, sz, style = Stroke(w))
+                if (frac > 0f) drawArc(color, -90f, 360f * min(1f, frac) * grow, false, tl, sz, style = Stroke(w, cap = StrokeCap.Round))
+            }
+            ring(w / 2 + 2.dp.toPx(), if (wk.planned > 0) wk.n.toFloat() / wk.planned else 0f, p.accent)
+            ring(w * 1.5f + 7.dp.toPx(), (share ?: 0) / 80f, p.gold)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            RingLine(p.accent, "${wk.n} of ${wk.planned}", "runs", if (!game) "" else if (wk.hit) "Streak safe" else (wk.need - wk.n).let { "$it more for your streak" })
+            RingLine(p.gold, share?.let { "$it%" } ?: "–", "easy, 14 days", "Aim for 80%")
+            e.usualWeekMinutes()?.let { Small("Your usual week: $it min") }
+        }
+    }
+    if (game) e.quests(mondayOf(e.today)).forEach { q -> QuestRow(q) }
+}
+
+@Composable
+fun Stat(big: String, label: String, modifier: Modifier = Modifier) {
+    Column(modifier) { Text(big, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, color = LocalPal.current.ink); Small(label) }
 }
 
 @Composable
 private fun QuestRow(q: Quest) {
     val p = LocalPal.current
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Canvas(Modifier.size(22.dp)) {
-            if (q.done) {
-                drawCircle(p.accent); val s = size.width
-                drawLine(p.accentInk, Offset(s * .28f, s * .52f), Offset(s * .44f, s * .68f), s * .11f, StrokeCap.Round)
-                drawLine(p.accentInk, Offset(s * .44f, s * .68f), Offset(s * .74f, s * .34f), s * .11f, StrokeCap.Round)
-            } else drawCircle(p.line, size.width / 2 - 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+        Box(Modifier.size(22.dp).clip(CircleShape).background(if (q.done) p.accent else Color.Transparent).then(if (q.done) Modifier else Modifier.border(2.dp, p.line, CircleShape)), contentAlignment = Alignment.Center) {
+            if (q.done) Glyph("check", p.accentInk, Modifier.size(13.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row { Text(q.title, Modifier.weight(1f), fontSize = 14.5.sp, color = if (q.done) p.muted else p.ink, fontFamily = BodyFont); Small("${q.have}/${q.need}") }
-            Meter(q.have.toFloat() / q.need * enter(800, 350), Modifier.height(5.dp))
+            Meter(q.have.toFloat() / q.need * enter(800, 200), Modifier.height(5.dp))
         }
     }
 }
@@ -232,69 +230,66 @@ private fun RingLine(dot: Color?, big: String, rest: String, sub: String) {
     }
 }
 
-/** The pace ladder: where Zone 2 pace started, where it is now, and the target at the far end. */
+/**
+ * The number the whole app is about, on top of its own history. Drag across the chart to read any run.
+ * When the pace has improved since the last visit, the number rolls down to the new value.
+ */
 @Composable
-fun Hero(e: Engine) {
+fun PaceHero(vm: AppVM, e: Engine, improved: Boolean) {
     val p = LocalPal.current
     val tg = e.s.targetPace.toDouble()
     val c = e.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.hero).padding(horizontal = 18.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero)) {
         if (c == null) {
-            Label("Zone 2 pace target", p.heroMuted)
-            BigPace(fmtPace(tg))
-            Text("Log a run with distance, time and average heart rate. The app converts it to your current Zone 2 pace and starts the ladder from there.",
-                color = p.heroInk, fontSize = 14.5.sp, lineHeight = 20.sp, fontFamily = BodyFont)
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Label("Zone 2 pace target", p.heroMuted)
+                BigPace(fmtPace(tg))
+                Text("Log a run with heart rate and your own pace takes this spot.", color = p.heroMuted, fontSize = 15.sp, lineHeight = 21.sp, fontFamily = BodyFont)
+            }
             return@Column
         }
-        val start = max(e.baseline ?: c, c)
+        val pts = e.eligible
+        val seen = vm.settings.seenPace
+        var scrub by remember { mutableStateOf<Int?>(null) }
+        val tick = haptic()
+        val roll = if (improved) enter(1500, 400) else 1f
+        LaunchedEffect(c.roundToInt()) {
+            if (seen != c.roundToInt()) { if (improved && Motion.on) { delay(1900); tick(true) }; vm.updateSettings { it.copy(seenPace = c.roundToInt()) } }
+        }
+        val at = scrub?.let { pts.getOrNull(it) }
+        val shown = at?.second ?: if (improved) seen + (c - seen) * roll else c
         val gap = c - tg
-        val go = enter(1100, 150)                                  // the marker travels from the start to today's pace
-        val full = if (start > tg) ((start - c) / (start - tg)).coerceIn(0.0, 1.0).toFloat() else 1f
-        val frac = full * go
-        Row(verticalAlignment = Alignment.Bottom) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Label("Zone 2 pace now, at ${e.refHr} bpm", p.heroMuted)
-                BigPace(fmtPace(start + (c - start) * go))
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Label("Target", p.heroMuted)
-                Text(fmtPace(tg), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 34.sp, lineHeight = 36.sp, color = p.heroInk)
-                Text(if (gap > 0) "${fmtPace(gap)} to go" else "reached", fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
-            }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Canvas(Modifier.fillMaxWidth().height(38.dp)) {
-                val top = 14.dp.toPx(); val h = 10.dp.toPx(); val r = CornerRadius(h / 2)
-                drawRoundRect(p.heroTrack, Offset(0f, top), Size(size.width, h), r)
-                if (frac > 0f) drawRoundRect(p.easy, Offset(0f, top), Size(max(size.width * frac, h), h), r)
-                if (start > tg) {
-                    var v = kotlin.math.ceil(tg / 15) * 15
-                    while (v < start) {
-                        if (v > tg) { val x = ((start - v) / (start - tg)).toFloat() * size.width; drawRect(p.heroMuted.copy(alpha = .45f), Offset(x, 10.dp.toPx()), Size(1.dp.toPx(), 18.dp.toPx())) }
-                        v += 15
-                    }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Label(if (at != null) "${fmtDay(at.first.date)} · ${TYPE_NAMES[at.first.type] ?: "Run"}" else "Zone 2 pace · ${e.refHr} bpm", p.heroMuted)
+                    BigPace(fmtPace(shown))
                 }
-                val mw = 6.dp.toPx()
-                drawRoundRect(p.heroMark, Offset((size.width * frac - mw / 2).coerceIn(0f, size.width - mw), 6.dp.toPx()), Size(mw, 26.dp.toPx()), CornerRadius(mw / 2))
+                Column(horizontalAlignment = Alignment.End) {
+                    Label("Target", p.heroMuted)
+                    Text(fmtPace(tg), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, lineHeight = 34.sp, color = p.heroInk)
+                    Text(if (gap > 0) "${fmtPace(gap)} to go" else "reached", fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
+                }
             }
-            Row {
-                Text("Started ${fmtPace(start)}", Modifier.weight(1f), fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
-                Text("each tick ${U.s(15)} s", fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
-                Text(fmtPace(tg), Modifier.weight(1f), fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont, textAlign = TextAlign.End)
+            val ch = e.paceChange()
+            val (line, loud) = when {
+                at != null -> (if (at.first.id == "_base") "Your starting point" else "Ran ${fmtPace(paceOf(at.first))} at ${at.first.avgHr} bpm") to false
+                improved -> "${U.s((seen - c).roundToInt())} seconds faster since you last looked." to true
+                gap <= 0 -> "You're holding your target. Set a faster one in Settings." to true
+                ch == null -> "A few more runs and the trend appears." to false
+                ch.delta >= 3 -> "${U.s(ch.delta.roundToInt())} seconds faster than ${ch.since}." to false
+                ch.delta <= -3 -> "${U.s((-ch.delta).roundToInt())} seconds slower than ${ch.since}." to false
+                else -> "Level with ${ch.since}." to false
             }
+            Text(line, color = if (loud) p.heroMark else p.heroInk, fontSize = 16.sp, lineHeight = 22.sp, fontFamily = BodyFont, fontWeight = FontWeight.Medium)
         }
-        val ch = e.paceChange(); val conf = e.confidence()
-        val line = when {
-            gap <= 0 -> "You're holding your target at Zone 2 heart rate. Set a faster one in Setup."
-            ch == null -> "Log a few more runs to see how your pace is moving."
-            ch.delta >= 3 -> "${U.s(ch.delta.roundToInt())} seconds faster than ${ch.since}."
-            ch.delta <= -3 -> "${U.s((-ch.delta).roundToInt())} seconds slower than ${ch.since}. Heat, tiredness or a hard run can do that."
-            else -> "Level with ${ch.since}."
-        }
-        Text(line, color = p.heroInk, fontSize = 16.sp, lineHeight = 22.sp, fontFamily = BodyFont, fontWeight = FontWeight.Medium)
-        if (conf != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { for (i in 0..2) Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= conf.level) p.heroMark else p.heroTrack)) }
-            Text("${conf.label}. ${conf.why}", color = p.heroMuted, fontSize = 13.sp, lineHeight = 18.sp, fontFamily = BodyFont)
+        PaceArea(pts, tg, e.today, scrub, { if (it != scrub) { scrub = it; if (it != null) tick(false) } }, Modifier.fillMaxWidth().height(128.dp),
+            line = p.easy.lighten(), target = p.heroInk, muted = p.heroMuted, dot = p.heroMark, ground = p.hero)
+        e.confidence()?.let { conf ->
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { for (i in 0..2) Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= conf.level) p.heroMark else p.heroTrack)) }
+                Text(conf.label + if (pts.size > 1) " · drag the chart to look back" else "", color = p.heroMuted, fontSize = 13.sp, fontFamily = BodyFont)
+            }
         }
     }
 }
@@ -303,65 +298,129 @@ fun Hero(e: Engine) {
 private fun BigPace(t: String) {
     val p = LocalPal.current
     Row(verticalAlignment = Alignment.Bottom) {
-        Text(t, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 84.sp, lineHeight = 76.sp, color = p.heroInk)
-        Text(" ${U.per}", Modifier.padding(bottom = 6.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.heroMuted)
+        Text(t, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 88.sp, lineHeight = 80.sp, color = p.heroInk)
+        Text(" ${U.per}", Modifier.padding(bottom = 7.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.heroMuted)
     }
 }
 
+/** Zone 2 pace over time as a filled curve. Faster is higher. Press or drag to pick a run; [onScrub] gets its index. */
 @Composable
-fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
+fun PaceArea(pts: List<Pair<Run, Double>>, targetPace: Double, today: LocalDate, scrub: Int?, onScrub: (Int?) -> Unit, modifier: Modifier,
+             line: Color, target: Color, muted: Color, dot: Color, ground: Color) {
+    val draw = enter(1100, 200)
+    val pad = 20f
+    fun xs(width: Float, density: Float): List<Float> {
+        val l = pad * density; val r = width - pad * density
+        if (pts.size == 1) return listOf((l + r) / 2)
+        val d0 = pts.first().first.date; val span = max(1L, ChronoUnit.DAYS.between(d0, maxOf(pts.last().first.date, today))).toFloat()
+        return pts.map { l + ChronoUnit.DAYS.between(d0, it.first.date) / span * (r - l) }
+    }
+    Canvas(modifier
+        .pointerInput(pts.size) { detectTapGestures(onPress = { o -> val x = xs(size.width.toFloat(), density); onScrub(x.indices.minByOrNull { abs(x[it] - o.x) }); if (tryAwaitRelease()) onScrub(null) }) }
+        .pointerInput(pts.size) {
+            detectHorizontalDragGestures(onDragStart = { o -> val x = xs(size.width.toFloat(), density); onScrub(x.indices.minByOrNull { abs(x[it] - o.x) }) }, onDragEnd = { onScrub(null) }, onDragCancel = { onScrub(null) }) { ch, _ ->
+                ch.consume(); val x = xs(size.width.toFloat(), density); onScrub(x.indices.minByOrNull { abs(x[it] - ch.position.x) })
+            }
+        }) {
+        if (pts.isEmpty()) return@Canvas
+        val x = xs(size.width, density)
+        val vmin = min(targetPace, pts.minOf { it.second }); val vmax = max(pts.maxOf { it.second }, vmin + 30)
+        val top = 16.dp.toPx(); val bottom = size.height - 10.dp.toPx()
+        fun y(v: Double) = top + ((v - vmin) / (vmax - vmin)).toFloat() * (bottom - top)
+        val ty = y(targetPace)
+        drawLine(target.copy(alpha = .55f), Offset(0f, ty), Offset(size.width, ty), 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f)))
+        drawContext.canvas.nativeCanvas.drawText("target", size.width - 20.dp.toPx(), ty + 15.dp.toPx(),
+            Paint().apply { isAntiAlias = true; textSize = 11.5.sp.toPx(); color = muted.toArgb(); textAlign = Paint.Align.RIGHT })
+        val ys = pts.map { y(it.second) }
+        val curve = Path().apply {
+            moveTo(if (pts.size == 1) 0f else x[0], ys[0])
+            if (pts.size == 1) lineTo(size.width, ys[0])
+            for (i in 1 until pts.size) { val mid = (x[i - 1] + x[i]) / 2; cubicTo(mid, ys[i - 1], mid, ys[i], x[i], ys[i]) }
+        }
+        val area = Path().apply { addPath(curve); lineTo(if (pts.size == 1) size.width else x.last(), size.height); lineTo(if (pts.size == 1) 0f else x[0], size.height); close() }
+        clipRect(right = size.width * draw) {
+            drawPath(area, Brush.verticalGradient(listOf(line.copy(alpha = .38f), line.copy(alpha = 0f)), startY = ys.min(), endY = size.height))
+            drawPath(curve, line, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
+        }
+        val i = scrub ?: pts.lastIndex
+        if (scrub != null) drawLine(muted.copy(alpha = .7f), Offset(x[i], 0f), Offset(x[i], size.height), 1.dp.toPx())
+        if (draw > .95f || scrub != null) { drawCircle(ground, 7.dp.toPx(), Offset(x[i], ys[i])); drawCircle(dot, 4.5.dp.toPx(), Offset(x[i], ys[i])) }
+    }
+}
+
+/** The plan as a week you can see at once: seven days across the top, one day's detail underneath. */
+@Composable
+fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run) -> Unit, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
-    var off by remember { mutableIntStateOf(0) }
-    var menu by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    val tick = haptic()
+    var off by rememberSaveable { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf<LocalDate?>(null) }
     val base = mondayOf(e.today)
     val mon = base.plusWeeks(off.toLong())
     val plan = e.weekPlan(mon)
     val onBreak = e.onBreak(mon)
-    Panel(Modifier.rise(0)) {
+    var sel by remember(off) { mutableIntStateOf(if (off == 0) e.today.dayOfWeek.value - 1 else (plan.ses.keys.firstOrNull() ?: 1) - 1) }
+    var restSeen = 0
+    val kinds = (0..6).map { i -> plan.ses[i + 1]?.kind ?: run { restSeen++; if (restSeen <= 2) "strength" else "rest" } }
+
+    Column(Modifier.rise(0), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Btn("←", ghost = true, small = true) { off-- }
+            Box(Modifier.clip(CircleShape).clickable { tick(false); off-- }.padding(10.dp)) { Glyph("left", p.ink, Modifier.size(20.dp)) }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Head("Step ${plan.wi + 1} · ${plan.phase}")
-                Small("${fmtDay(mon)} – ${fmtDay(mon.plusDays(6))} · ${plan.total} min planned")
+                Head(if (onBreak) "Week off" else "Step ${plan.wi + 1} · ${plan.phase}")
+                Small("${fmtDay(mon)} – ${fmtDay(mon.plusDays(6))} · ${plan.total} min")
             }
-            Btn("→", ghost = true, small = true) { off++ }
+            Box(Modifier.clip(CircleShape).clickable { tick(false); off++ }.padding(10.dp)) { Glyph("right", p.ink, Modifier.size(20.dp)) }
         }
-        if (onBreak) NoteBox(Note("good", "Week off. Your streak is safe and the plan waits for you."))
-        var rest = 0
-        for (i in 0..6) {
-            val d = mon.plusDays(i.toLong()); val s = plan.ses[d.dayOfWeek.value]; val rs = e.runsOn(d)
-            val isToday = d == e.today
-            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.width(54.dp)) {
-                    Text(DOW[i], fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = if (isToday) p.accent else p.ink)
-                    Small(fmtDay(d) + if (isToday) "\ntoday" else "")
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (i in 0..6) {
+                val d = mon.plusDays(i.toLong()); val s = plan.ses[i + 1]; val ran = e.runsOn(d).isNotEmpty(); val today = d == e.today
+                val shape = RoundedCornerShape(14.dp)
+                Column(Modifier.weight(1f).clip(shape).background(if (i == sel) p.surface else Color.Transparent).then(if (i == sel) Modifier.border(1.dp, p.line, shape) else Modifier)
+                    .clickable { tick(false); sel = i }.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(DOW[i], fontSize = 12.sp, fontFamily = BodyFont, fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.accent else p.muted)
+                    SessionArt(kinds[i], Modifier.size(34.dp), done = ran)
+                    Text(if (s != null) "${s.min}" else "·", fontSize = 12.sp, fontFamily = BodyFont, color = if (s != null && !ran && d.isBefore(e.today) && !onBreak) p.warnInk else p.muted)
                 }
+            }
+        }
+    }
+
+    // The selected day.
+    key(off, sel) {
+        val d = mon.plusDays(sel.toLong()); val s = plan.ses[sel + 1]; val rs = e.runsOn(d); val today = d == e.today
+        var showSteps by remember { mutableStateOf(false) }
+        Panel(Modifier.rise(1)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                SessionArt(kinds[sel], Modifier.size(58.dp), done = rs.isNotEmpty())
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (s != null) {
-                        Text("${s.title} · ${s.min} min", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = if (onBreak) p.muted else p.ink, fontFamily = BodyFont)
-                        Small(s.detail)
-                    } else {
-                        rest++
-                        if (rest <= 2) { Body("Strength, 20 min", p.muted); Small("Squats, lunges, calf raises, planks.") } else Body("Rest", p.muted)
-                    }
-                    rs.firstOrNull()?.let { r -> Small("Logged: ${U.dist(r.distKm)} at ${fmtPace(paceOf(r))}" + if (r.avgHr > 0) ", ${r.avgHr} bpm" else "", p.ink) }
-                    if (rs.isEmpty() && !d.isBefore(e.today) && !onBreak) Text(if (s != null) "Change" else "Add a run", Modifier.clickable { menu = d }.padding(top = 4.dp, bottom = 2.dp, end = 12.dp),
-                        color = p.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                    Label("${DAY_NAMES[sel]} ${fmtDay(d)}" + if (today) " · today" else "")
+                    Head(s?.title ?: if (kinds[sel] == "strength") "Strength, 20 min" else "Rest")
+                    if (s != null) Small("${s.min} min · " + if (s.type in setOf("tempo", "intervals")) "hard day" else "cap ${e.zb[2] - 1} bpm")
                 }
-                when {
-                    rs.isNotEmpty() -> Tag("Done", p.goodBg, p.goodInk)
-                    onBreak -> Unit
-                    s != null && d.isBefore(e.today) -> Tag("Missed", p.warnBg, p.warnInk)
-                    s != null -> Btn("Log", ghost = true, small = true) { openForm(FormSeed(date = d, type = s.type)) }
+                if (rs.isEmpty() && s != null && d.isBefore(e.today) && !onBreak) Tag("Missed", p.warnBg, p.warnInk)
+            }
+            Text(when { onBreak -> "You're taking this week off."; s != null -> s.detail.substringBefore(". ") + "."; kinds[sel] == "strength" -> "Squats, lunges, calf raises, planks."; else -> "Nothing planned. Rest is part of the plan." },
+                fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
+            if (s != null) {
+                AnimatedVisibility(showSteps) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        e.steps(s).let { st -> st.take(10).forEach { x ->
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Dot(p.zones[(x.zHi - 1).coerceIn(0, 4)]); Body(x.label, modifier = Modifier.weight(1f)); Small(if (x.sec == 0) "open" else if (x.sec >= 60) "${x.sec / 60} min" else "${x.sec} s")
+                            }
+                        }; if (st.size > 10) Small("…and ${st.size - 10} more blocks.") }
+                    }
                 }
             }
-        }
-        if (off >= 0) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Small(if (onBreak) "Feeling better? Bring the week back." else "Sick, travelling or worn out? Take the week off without losing your streak.", modifier = Modifier.weight(1f))
-                Btn(if (onBreak) "I'm back" else "Take week off", ghost = true, small = true) { vm.toggleBreak(mon) }
+            rs.firstOrNull()?.let { r -> Link("road", "Logged", "${U.dist(r.distKm)} · ${fmtPace(paceOf(r))} ${U.per}" + if (r.avgHr > 0) " · ${r.avgHr} bpm" else "") { openRun(r) } }
+            if (rs.isEmpty() && !onBreak) {
+                if (s != null && today) BigBtn("Start run", "play") { openLive(s) }
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (s != null && !d.isAfter(e.today)) TextLink("Log it") { openForm(FormSeed(date = d, type = s.type)) }
+                    if (s != null) TextLink(if (showSteps) "Hide blocks" else "What you'll do") { showSteps = !showSteps }
+                    if (!d.isBefore(e.today)) TextLink(if (s != null) "Change" else "Add a run") { menu = d }
+                }
             }
         }
     }
@@ -372,8 +431,8 @@ fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
         androidx.compose.material3.AlertDialog(onDismissRequest = close, confirmButton = { androidx.compose.material3.TextButton(close) { Text("Close") } },
             title = { Text("${DAY_NAMES[d.dayOfWeek.value - 1]} ${fmtDay(d)}") },
             text = {
-                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Small(if (cur != null) "Planned: ${cur.title}, ${cur.min} min. Swap it for:" else "Rest day. Add:")
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Small(if (cur != null) "Planned: ${cur.title}. Swap it for:" else "Rest day. Add:")
                     SWAP_KINDS.forEach { (kind, name) -> Pick(name, cur?.kind == kind, Modifier.fillMaxWidth()) { vm.override(d, kind); close() } }
                     if (cur != null) {
                         val free = (0..6).map { mon.plusDays(it.toLong()) }.filter { it != d && !it.isBefore(e.today) && plan.ses[it.dayOfWeek.value] == null && e.runsOn(it).isEmpty() }
@@ -388,40 +447,39 @@ fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
             })
     }
 
-    // How the last eight weeks went, oldest on the left.
-    val recent = e.weeks.takeLast(8)
-    if (e.runs.isNotEmpty()) Panel(Modifier.rise(1)) {
-        Label("Recent weeks")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            recent.forEach { w ->
-                val (bg, mark) = when (w.state) {
-                    WeekState.HIT -> p.accent to "✓"; WeekState.FROZEN -> p.zones[0] to "❄"; WeekState.BREAK -> p.surface2 to "z"
-                    WeekState.MISS -> p.warnBg to "–"; WeekState.OPEN -> p.surface2 to "·"
-                }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(bg), contentAlignment = Alignment.Center) {
-                        Text(mark, color = if (w.state == WeekState.HIT || w.state == WeekState.FROZEN) Color.White else p.muted, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+    Column(Modifier.rise(2)) {
+        if (off >= 0) Link("moon", if (onBreak) "I'm back" else "Take this week off", if (onBreak) "Bring the week back" else "Sick, travelling or worn out? Your streak stays safe.") { vm.toggleBreak(mon) }
+        if (e.runs.isNotEmpty()) {
+            val recent = e.weeks.takeLast(8)
+            Fold("chart", "Recent weeks", recent.count { it.state == WeekState.HIT }.let { "$it of ${recent.size} completed" }, startOpen = true) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    recent.forEach { w ->
+                        val (bg, fg, g) = when (w.state) {
+                            WeekState.HIT -> Triple(p.accent, p.accentInk, "check"); WeekState.FROZEN -> Triple(p.zones[0], Color.White, "snow"); WeekState.BREAK -> Triple(p.surface2, p.muted, "moon")
+                            WeekState.MISS -> Triple(p.warnBg, p.warnInk, "dash"); WeekState.OPEN -> Triple(p.surface2, p.muted, "dot")
+                        }
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) { Glyph(g, fg, Modifier.fillMaxSize(.5f)) }
+                            Text(fmtDay(w.mon).substringBefore(" "), fontSize = 11.sp, color = p.muted, fontFamily = BodyFont)
+                        }
                     }
-                    Text(fmtDay(w.mon).substringBefore(" "), fontSize = 11.sp, color = p.muted, fontFamily = BodyFont)
+                    repeat(8 - recent.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Small("Tick: goal hit. Snowflake: a rest pass covered it. Moon: week off. Dash: missed. The plan only moves on after a completed week.")
+            }
+        }
+        val plans = (0 until 12).map { e.weekPlan(base.plusWeeks(it.toLong())) }
+        Fold("bars", "Next 12 weeks", "${plans.first().total} min now, ${plans.maxOf { it.total }} at the peak") {
+            val mx = max(1, plans.maxOf { it.total })
+            val grow = enter(600, 100)
+            Row(Modifier.height(56.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
+                plans.forEachIndexed { i, w ->
+                    Box(Modifier.weight(1f).fillMaxHeight(max(.15f, w.total.toFloat() / mx * grow)).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                        .background(if (i == off) p.accent else p.line.copy(alpha = if (w.pos == 3) .55f else 1f)).clickable { tick(false); off = i })
                 }
             }
-            repeat(8 - recent.size) { Spacer(Modifier.weight(1f)) }
+            Small("Three steps build by about 8%, the fourth eases off and re-tests. Tap a bar to open that week.")
         }
-        Small("✓ goal hit · ❄ covered by a rest pass · z week off · – missed. The plan moves to the next step only after a completed week, so you never get pushed ahead of your training.")
-    }
-
-    Panel(Modifier.rise(2)) {
-        val plans = (0 until 12).map { e.weekPlan(base.plusWeeks(it.toLong())) }
-        val mx = max(1, plans.maxOf { it.total })
-        val grow = enter(700, 200)
-        Row { Label("Next 12 weeks, planned minutes"); Spacer(Modifier.weight(1f)); if (off in 0..11) Small("${plans[off].total} min") }
-        Row(Modifier.height(56.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
-            plans.forEachIndexed { i, w ->
-                Box(Modifier.weight(1f).fillMaxHeight(max(.15f, w.total.toFloat() / mx * grow)).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                    .background(if (i == off) p.accent else p.line.copy(alpha = if (w.pos == 3) .55f else 1f)).clickable { off = i })
-            }
-        }
-        Small("Three steps build by about 8% each, the fourth drops back so your body absorbs the work and you re-test. Tap a bar to open that week.")
     }
 }
 

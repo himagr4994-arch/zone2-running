@@ -2,7 +2,7 @@
 
 **Get faster at an easy heart rate.**
 
-Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace down to a target you choose (7:00 /km by default). It turns every steady run into "the pace you would hold at Zone 2 heart rate", tracks that number over time, and gives you a weekly plan built around it. Everything stays on your phone.
+Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace down to a target you choose (7:00 /km by default). It turns every steady run into "the pace you would hold at Zone 2 heart rate", tracks that number over time, and gives you a weekly plan built around it. Your runs stay on your phone.
 
 ## What it does
 
@@ -12,6 +12,12 @@ Zone 2 Running is a small Android app for one goal: bringing your Zone 2 pace do
 - **Setup guide.** Enter a target pace, any recent pace with the heart rate you saw at it, and your age or max heart rate. You get your zones, your current Zone 2 pace and a plan, with a note on which answer produced what.
 - **Zone 2 estimate from any run.** A hard 10K still tells you something. Each run's pace is scaled along heart-rate reserve to your Zone 2 reference heart rate.
 - **A plan that waits for you.** Three steps grow by about 8%, the fourth eases off and ends with a 30-minute Zone 2 test. The plan only moves on after a completed week, and switches easy runs to run-walk when your easy runs keep drifting into Zone 3.
+- **Guided live runs.** Start a session and the phone tracks time, distance and pace by GPS, walks you through each block, and speaks or buzzes at block changes and each kilometre. With a Bluetooth heart-rate sensor it also tells you the moment you leave Zone 2. The route is never stored.
+- **Kilometre splits** for live runs, and for imported runs when the recording app wrote distance in fine enough pieces.
+- **Swap, move or skip any session** from the plan.
+- **A race goal.** Pick an event and date; the plan tapers over the last two weeks and shows a projected finish time.
+- **Heat adjustment (optional).** With weather switched on, hot and humid hours lower the expected pace and no longer count against your Zone 2 estimate.
+- **Kilometres or miles.**
 - **Health Connect import.** Runs recorded by your watch app, Strava, unstrap or anything else that writes to Health Connect arrive with distance, time, heart rate and time in each zone. Read-only.
 - **Nine two-minute lessons**, each ending with one question.
 - **Streaks that forgive.** A week counts at about three-quarters of its runs. Rest passes cover a missed week, and a week marked as time off never breaks the streak.
@@ -27,7 +33,7 @@ Download the APK from the latest release and open it on your phone (Android 8 or
 
 ## Privacy
 
-No account, no server, no analytics, and no internet permission. See [docs/privacy.md](docs/privacy.md).
+No account, no server, no analytics. The app goes online only if you switch on weather or the update check. See [docs/privacy.md](docs/privacy.md).
 
 ## How the numbers work
 
@@ -47,6 +53,8 @@ You need JDK 17 or newer and the Android SDK (platform 36).
 ```
 
 The tests also render every screen on the JVM and save pictures to `app/build/shots/`, so you can see a change without a phone.
+
+To switch on the in-app update check, set `UPDATE_REPO` in `app/build.gradle.kts` to your public `owner/repository`.
 
 For a signed release, put a `keystore.properties` file in the project root (it is git-ignored):
 

@@ -35,11 +35,11 @@ import kotlin.math.sin
 
 private data class Scene(val title: String, val body: String)
 
-private val SCENES = listOf(
+private val SCENES get() = listOf(
     Scene("Hi, I'm Dil. I'm your heart.", "I do the work on every run. Give me two minutes and I'll show you how to make me stronger without wearing either of us out."),
     Scene("Most runs are too hard for me.", "Push every run and I'm always playing catch-up. You end up tired, running less than you could, and stuck at the same pace."),
     Scene("Slow down until you can chat.", "That's Zone 2. It feels almost too easy, and that's the point: easy running is the kind you can do a lot of, week after week."),
-    Scene("Same heartbeat, faster pace.", "As I get stronger, the same easy effort carries you faster. That number is your Zone 2 pace. It sets what you can hold for hours: the average marathon finisher keeps up about 6:24 per km for four and a half."),
+    Scene("Same heartbeat, faster pace.", "As I get stronger, the same easy effort carries you faster. That number is your Zone 2 pace. It sets what you can hold for hours: the average marathon finisher keeps up about ${fmtPace(384.0)} per ${U.word} for four and a half."),
     Scene("Mostly easy. Sometimes hard.", "Top endurance athletes do roughly four-fifths of their training easy. The hard fifth still matters, so your plan keeps one harder session a week."),
     Scene("Here's the deal.", ""),
 )
@@ -138,11 +138,11 @@ private fun SceneArt(i: Int) {
             Canvas(Modifier.fillMaxSize()) {
                 val label = Paint().apply { isAntiAlias = true; typeface = face; textSize = 20.sp.toPx(); color = p.heroMuted.toArgb() }
                 val big = Paint().apply { isAntiAlias = true; typeface = face; textSize = 34.sp.toPx(); color = p.heroInk.toArgb(); textAlign = Paint.Align.RIGHT }
-                val lanes = listOf(Triple("TODAY", 1f, "8:30"), Triple("MONTH 6", 1.6f, fmtPace(pace.toDouble())))
+                val lanes = listOf(Triple("TODAY", 1f, fmtPace(510.0)), Triple("MONTH 6", 1.6f, fmtPace(pace.toDouble())))
                 lanes.forEachIndexed { k, (name, speed, txt) ->
                     val y = size.height * (.27f + k * .47f)
                     drawContext.canvas.nativeCanvas.drawText(name, 0f, y - 44.dp.toPx(), label)
-                    drawContext.canvas.nativeCanvas.drawText("$txt /km", size.width, y - 40.dp.toPx(), big)
+                    drawContext.canvas.nativeCanvas.drawText("$txt ${U.per}", size.width, y - 40.dp.toPx(), big)
                     drawLine(p.heroTrack, Offset(0f, y + 22.dp.toPx()), Offset(size.width, y + 22.dp.toPx()), 6.dp.toPx(), StrokeCap.Round)
                     val u = 46.dp.toPx() / 100f
                     val x = if (Motion.on) ((t * speed) % 1f) * (size.width + 100 * u) - 100 * u else size.width * (.25f + k * .4f)

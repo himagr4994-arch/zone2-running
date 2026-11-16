@@ -28,9 +28,9 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     val nb = g.badges.filter { b -> b.got && g0.badges.none { it.id == b.id && it.got } }
     val up = g.level > g0.level
     val recs = ArrayList<String>()
-    if (g0.longest > 0 && g.longest > g0.longest) recs += "Longest run: ${f2(g.longest)} km"
-    if (g0.bestEst != null && g.bestEst != null && g.bestEst < g0.bestEst - .5) recs += "Best Zone 2 estimate: ${fmtPace(g.bestEst)} /km"
-    if (g0.fast != null && g.fast != null && g.fast < g0.fast - .5) recs += "Fastest run: ${fmtPace(g.fast)} /km"
+    if (g0.longest > 0 && g.longest > g0.longest) recs += "Longest run: ${U.dist(g.longest)}"
+    if (g0.bestEst != null && g.bestEst != null && g.bestEst < g0.bestEst - .5) recs += "Best Zone 2 estimate: ${fmtPace(g.bestEst)} ${U.per}"
+    if (g0.fast != null && g.fast != null && g.fast < g0.fast - .5) recs += "Fastest run: ${fmtPace(g.fast)} ${U.per}"
     val z = if (r.avgHr > 0) after.zoneOf(r.avgHr) else 0
     val easyType = r.type in setOf("easy", "long", "test")
     val msg = when {
@@ -39,7 +39,7 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
         r.type == "test" -> "Benchmark recorded."
         else -> "Hard work banked. Keep the next run properly easy."
     }
-    val summary = "${f2(r.distKm)} km · ${fmtDur(r.durSec)} · ${fmtPace(paceOf(r))} /km" + if (r.avgHr > 0) " · ${r.avgHr} bpm (Z$z)" else ""
+    val summary = "${U.dist(r.distKm)} · ${fmtDur(r.durSec)} · ${fmtPace(paceOf(r))} ${U.per}" + if (r.avgHr > 0) " · ${r.avgHr} bpm (Z$z)" else ""
     val w = after.weekHit(mondayOf(r.date))
     val streakLine = if (w.hit) "Weekly goal hit. Streak: ${g.streak} week${if (g.streak == 1) "" else "s"}." else "${w.n} of ${w.need} runs toward this week's streak."
     val title = when {
@@ -51,11 +51,11 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     }
     val share = buildString {
         append("Zone 2 Running · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}\n$summary\n")
-        after.current?.let { append("Zone 2 pace now ${fmtPace(it)} /km, target ${fmtPace(after.s.targetPace.toDouble())}\n") }
+        after.current?.let { append("Zone 2 pace now ${fmtPace(it)} ${U.per}, target ${fmtPace(after.s.targetPace.toDouble())}\n") }
         append("Level ${g.level} ${levelName(g.level)} · ${g.streak} week streak")
         if (nb.isNotEmpty()) append("\nUnlocked: " + nb.joinToString { it.name })
     }
-    return Celebration(title, g.xp - g0.xp, g, nb, recs, msg, summary, after.est(r)?.let { "Zone 2 estimate from this run: ${fmtPace(it)} /km" },
+    return Celebration(title, g.xp - g0.xp, g, nb, recs, msg, summary, after.est(r)?.let { "Zone 2 estimate from this run: ${fmtPace(it)} ${U.per}" },
         streakLine, g.streak > 0, share, up || nb.isNotEmpty() || recs.isNotEmpty(),
         r, z, after.current, after.s.targetPace, if (g.streak > g0.streak && g.streak in setOf(4, 8, 12, 26, 52)) g.streak else 0)
 }
@@ -63,6 +63,11 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
 class AppVM(app: Application) : AndroidViewModel(app) {
     private val store = Store(app)
     val health = Health(app)
+    val weather = WeatherCache(app)
+    /** Bumped when a new forecast arrives, so the home screen recomputes. */
+    var wxTick by mutableStateOf(0); private set
+    var cityBusy by mutableStateOf(false); private set
+    var update by mutableStateOf<Pair<String, String>?>(null); private set
 
     var data by mutableStateOf(store.load()); private set
     var celebration by mutableStateOf<Celebration?>(null)
@@ -73,7 +78,9 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var clock by mutableStateOf(java.time.LocalTime.now())
 
     val settings get() = data.settings
-    fun engine() = Engine(data.settings, data.runs, LocalDate.now())
+    fun engine() = Engine(data.settings, data.runs, LocalDate.now(), if (data.settings.weatherOn) weather else null)
+
+    init { U.miles = data.settings.miles }
 
     private fun commit(d: AppData) {
         var nd = d
@@ -81,13 +88,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         try {
             store.autoBackup(nd, LocalDate.now())?.let { nd = nd.copy(settings = nd.settings.copy(lastBackup = it)); store.save(nd) }
         } catch (e: Exception) { /* a failed backup must never block saving */ }
+        U.miles = nd.settings.miles
         data = nd
     }
 
     fun updateSettings(f: (Settings) -> Settings) = commit(data.copy(settings = f(data.settings)))
 
-    fun saveRun(r: Run, isNew: Boolean) {
+    /** Tags a run with how much the weather slowed it, when the forecast covers the hour it started. */
+    private fun withHeat(r: Run): Run {
+        if (!settings.weatherOn || r.heatPct != 0.0 || r.startMin < 0) return r
+        return weather.at(r.date, r.startMin)?.let { r.copy(heatPct = heatPct(it.first, it.second)) } ?: r
+    }
+
+    fun saveRun(run: Run, isNew: Boolean) {
         val before = engine()
+        val r = withHeat(run)
         commit(data.copy(runs = data.runs.filter { it.id != r.id } + r))
         if (isNew && settings.gameOn) celebration = buildCelebration(before, engine(), listOf(r)) else toast = "Run saved"
     }
@@ -102,7 +117,40 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         clock = java.time.LocalTime.now()
         healthGranted = try { health.granted() } catch (e: Exception) { false }
         if (healthGranted && settings.autoImport && settings.onboarded) importHealth(manual = false)
+        refreshOnline()
     }
+
+    /** Fetches the forecast (at most every three hours) and looks for a newer version, each only if switched on. */
+    private suspend fun refreshOnline() {
+        val s = settings
+        if (s.weatherOn && (s.lat != 0.0 || s.lon != 0.0) && System.currentTimeMillis() - weather.fetchedAt > 3 * 3600_000L)
+            Online.forecast(s.lat, s.lon)?.let { weather.store(it); wxTick++ }
+        if (s.updateCheck) Online.latestRelease()?.let { if (Online.newer(it.first, BuildConfig.VERSION_NAME)) update = it }
+    }
+
+    fun setCity(name: String) {
+        if (name.isBlank() || cityBusy) return
+        cityBusy = true
+        viewModelScope.launch {
+            val hit = Online.geocode(name)
+            if (hit == null) toast = "Couldn't find that place. Check the spelling and your connection."
+            else {
+                updateSettings { it.copy(weatherOn = true, city = hit.first, lat = hit.second, lon = hit.third) }
+                Online.forecast(hit.second, hit.third)?.let { weather.store(it); wxTick++ }
+                toast = "Weather on for ${hit.first}"
+            }
+            cityBusy = false
+        }
+    }
+
+    fun weatherOff() { weather.clear(); updateSettings { it.copy(weatherOn = false) }; wxTick++ }
+
+    /** Swaps, adds or skips the session on one day. A null kind puts the plan's own session back. */
+    fun override(date: LocalDate, kind: String?) = updateSettings { it.copy(overrides = if (kind == null) it.overrides - date else it.overrides + (date to kind)) }
+
+    fun moveSession(from: LocalDate, to: LocalDate, kind: String) = updateSettings { it.copy(overrides = it.overrides + (from to "skip") + (to to kind)) }
+
+    fun setRace(name: String, date: LocalDate?, km: Double) = updateSettings { it.copy(raceName = name.trim().take(40), raceDate = date, raceKm = km) }
 
     fun importHealth(manual: Boolean) {
         if (importing) return
@@ -113,7 +161,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 val found = health.readRuns(Instant.now().minus(60, ChronoUnit.DAYS), e::zoneOf) { d, h -> e.guessType(d, h) }
                 val known = data.runs.map { it.id }.toSet() + data.hidden
                 // Skip anything already typed in by hand: same day, distance within 5%.
-                val fresh = found.filter { n -> n.id !in known && data.runs.none { it.date == n.date && abs(it.distKm - n.distKm) <= n.distKm * .05 } }
+                val fresh = found.filter { n -> n.id !in known && data.runs.none { it.date == n.date && abs(it.distKm - n.distKm) <= n.distKm * .05 } }.map { withHeat(it) }
                 if (fresh.isNotEmpty()) {
                     val before = engine()
                     commit(data.copy(runs = data.runs + fresh))

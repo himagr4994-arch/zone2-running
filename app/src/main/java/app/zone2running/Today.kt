@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -28,7 +29,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
-fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Unit, openLesson: (Lesson) -> Unit, openForm: (FormSeed) -> Unit) {
+fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Unit, openLesson: (Lesson) -> Unit, openLive: (Session) -> Unit, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
     val game = vm.settings.gameOn
     val lead = remember(e, vm.clock) { e.lead(vm.clock) }
@@ -45,12 +46,32 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
             }
         }
         Text(lead.body, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
-        lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let { Small("Heart rate cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first)}–${fmtPace(it.second)} /km, but go by heart rate.") }
+        lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let {
+            val slow = 1 + lead.heatPct / 100
+            Small("Heart rate cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first * slow)}–${fmtPace(it.second * slow)} ${U.per}, but go by heart rate.")
+        }
         lead.run?.let { RunFacts(it, e) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (lead.cta.isNotEmpty()) Btn(lead.cta) { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
+            if (lead.cta.isNotEmpty()) {
+                // Start a guided run now, or log one that already happened.
+                Btn("Start run") { openLive(lead.session ?: Session("easy", "Easy run", 20, "Keep HR ${e.zb[1]}–${e.zb[2] - 1} bpm. You should be able to speak full sentences.")) }
+                Btn("Log it", ghost = true) { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
+            }
             if (lead.kind == "rest" && nextLesson != null) Btn("2-minute lesson", ghost = lead.cta.isNotEmpty()) { openLesson(nextLesson) }
-            if (lead.kind == "plan" || lead.kind == "rest" || lead.kind == "done") Btn("Full plan", ghost = true, onClick = openPlan)
+            if (lead.kind == "plan" || lead.kind == "rest" || lead.kind == "done") Btn("Plan", ghost = true, onClick = openPlan)
+        }
+    }
+
+    vm.update?.let { (version, url) ->
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        Panel { Label("Update"); Body("Version $version is out. Installing it keeps your data."); Btn("See what's new", small = true) { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } } }
+    }
+
+    e.raceDaysLeft?.let { left ->
+        Panel(Modifier.rise(k++)) {
+            Row { Label("Race goal"); Spacer(Modifier.weight(1f)); Small(when (left) { 0 -> "today"; 1 -> "tomorrow"; else -> "in $left days" }) }
+            Head("${e.s.raceName.ifBlank { "Your race" }} · ${U.dist(e.s.raceKm, 1)}", 20)
+            Small(e.racePrediction()?.let { "Your hardest recent run points to about ${fmtDur(it)}. The plan tapers over the last two weeks." } ?: "Log one hard run and a projected time appears here. The plan tapers over the last two weeks.")
         }
     }
 
@@ -89,7 +110,7 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
     if (rv != null && e.today.dayOfWeek.value <= 2 && lead.kind != "review") Panel(Modifier.rise(k++)) {
         Label("Last week in review")
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            Stat("${rv.n}/${rv.planned}", "runs"); Stat(f1(rv.km), "km"); Stat(rv.easyShare?.let { "$it%" } ?: "–", "easy")
+            Stat("${rv.n}/${rv.planned}", "runs"); Stat(f1(U.k(rv.km)), U.unit); Stat(rv.easyShare?.let { "$it%" } ?: "–", "easy")
         }
         NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line))
     }
@@ -119,7 +140,7 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
 fun RunFacts(r: Run, e: Engine) {
     val p = LocalPal.current
     Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Stat(f2(r.distKm), "km"); Stat(fmtDur(r.durSec), "time"); Stat(fmtPace(paceOf(r)), "/km"); if (r.avgHr > 0) Stat("${r.avgHr}", "bpm")
+        Stat(f2(U.k(r.distKm)), U.unit); Stat(fmtDur(r.durSec), "time"); Stat(fmtPace(paceOf(r)), U.per); if (r.avgHr > 0) Stat("${r.avgHr}", "bpm")
     }
     val tot = r.zoneSec.sum()
     if (r.zoneSec.size == 5 && tot > 0) {
@@ -135,7 +156,7 @@ fun RunFacts(r: Run, e: Engine) {
             Dot(p.zones[z - 1]); Small("Averaged Zone $z. Import runs through Health Connect to see minutes in each zone.", p.ink)
         }
     }
-    e.est(r)?.let { Small("Zone 2 estimate from this run: ${fmtPace(it)} /km") }
+    e.est(r)?.let { Small("Zone 2 estimate from this run: ${fmtPace(it)} ${U.per}") }
 }
 
 @Composable
@@ -164,7 +185,7 @@ private fun WeekCard(e: Engine, game: Boolean, modifier: Modifier) {
                     if (!game) "" else if (wk.hit) "Streak safe for this week" else (wk.need - wk.n).let { "$it more ${if (it == 1) "run keeps" else "runs keep"} your streak" })
                 RingLine(p.gold, share?.let { "$it%" } ?: "–", "easy, last 14 days", "Fill the ring at 80%")
                 val mins = (wk.s.easy + wk.s.hard).roundToInt()
-                RingLine(null, "$mins min", "so far", e.usualWeekMinutes()?.let { "Your usual week is $it min" } ?: "${f1(wk.s.km)} km")
+                RingLine(null, "$mins min", "so far", e.usualWeekMinutes()?.let { "Your usual week is $it min" } ?: "${U.dist(wk.s.km, 1)}")
             }
         }
         if (game) {
@@ -258,7 +279,7 @@ fun Hero(e: Engine) {
             }
             Row {
                 Text("Started ${fmtPace(start)}", Modifier.weight(1f), fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
-                Text("each tick 15 s", fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
+                Text("each tick ${U.s(15)} s", fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont)
                 Text(fmtPace(tg), Modifier.weight(1f), fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont, textAlign = TextAlign.End)
             }
         }
@@ -266,8 +287,8 @@ fun Hero(e: Engine) {
         val line = when {
             gap <= 0 -> "You're holding your target at Zone 2 heart rate. Set a faster one in Setup."
             ch == null -> "Log a few more runs to see how your pace is moving."
-            ch.delta >= 3 -> "${ch.delta.roundToInt()} seconds faster than ${ch.since}."
-            ch.delta <= -3 -> "${(-ch.delta).roundToInt()} seconds slower than ${ch.since}. Heat, tiredness or a hard run can do that."
+            ch.delta >= 3 -> "${U.s(ch.delta.roundToInt())} seconds faster than ${ch.since}."
+            ch.delta <= -3 -> "${U.s((-ch.delta).roundToInt())} seconds slower than ${ch.since}. Heat, tiredness or a hard run can do that."
             else -> "Level with ${ch.since}."
         }
         Text(line, color = p.heroInk, fontSize = 16.sp, lineHeight = 22.sp, fontFamily = BodyFont, fontWeight = FontWeight.Medium)
@@ -283,7 +304,7 @@ private fun BigPace(t: String) {
     val p = LocalPal.current
     Row(verticalAlignment = Alignment.Bottom) {
         Text(t, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 84.sp, lineHeight = 76.sp, color = p.heroInk)
-        Text(" /km", Modifier.padding(bottom = 6.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.heroMuted)
+        Text(" ${U.per}", Modifier.padding(bottom = 6.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.heroMuted)
     }
 }
 
@@ -291,6 +312,7 @@ private fun BigPace(t: String) {
 fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
     val p = LocalPal.current
     var off by remember { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf<java.time.LocalDate?>(null) }
     val base = mondayOf(e.today)
     val mon = base.plusWeeks(off.toLong())
     val plan = e.weekPlan(mon)
@@ -323,7 +345,9 @@ fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
                         rest++
                         if (rest <= 2) { Body("Strength, 20 min", p.muted); Small("Squats, lunges, calf raises, planks.") } else Body("Rest", p.muted)
                     }
-                    rs.firstOrNull()?.let { r -> Small("Logged: ${f2(r.distKm)} km at ${fmtPace(paceOf(r))}" + if (r.avgHr > 0) ", ${r.avgHr} bpm" else "", p.ink) }
+                    rs.firstOrNull()?.let { r -> Small("Logged: ${U.dist(r.distKm)} at ${fmtPace(paceOf(r))}" + if (r.avgHr > 0) ", ${r.avgHr} bpm" else "", p.ink) }
+                    if (rs.isEmpty() && !d.isBefore(e.today) && !onBreak) Text(if (s != null) "Change" else "Add a run", Modifier.clickable { menu = d }.padding(top = 4.dp, bottom = 2.dp, end = 12.dp),
+                        color = p.accent, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
                 }
                 when {
                     rs.isNotEmpty() -> Tag("Done", p.goodBg, p.goodInk)
@@ -340,6 +364,28 @@ fun PlanScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
                 Btn(if (onBreak) "I'm back" else "Take week off", ghost = true, small = true) { vm.toggleBreak(mon) }
             }
         }
+    }
+
+    menu?.let { d ->
+        val cur = plan.ses[d.dayOfWeek.value]
+        val close = { menu = null }
+        androidx.compose.material3.AlertDialog(onDismissRequest = close, confirmButton = { androidx.compose.material3.TextButton(close) { Text("Close") } },
+            title = { Text("${DAY_NAMES[d.dayOfWeek.value - 1]} ${fmtDay(d)}") },
+            text = {
+                Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Small(if (cur != null) "Planned: ${cur.title}, ${cur.min} min. Swap it for:" else "Rest day. Add:")
+                    SWAP_KINDS.forEach { (kind, name) -> Pick(name, cur?.kind == kind, Modifier.fillMaxWidth()) { vm.override(d, kind); close() } }
+                    if (cur != null) {
+                        val free = (0..6).map { mon.plusDays(it.toLong()) }.filter { it != d && !it.isBefore(e.today) && plan.ses[it.dayOfWeek.value] == null && e.runsOn(it).isEmpty() }
+                        if (free.isNotEmpty()) {
+                            Small("Or move it to:")
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { free.forEach { t -> Pick(DOW[t.dayOfWeek.value - 1], false, Modifier.weight(1f)) { vm.moveSession(d, t, cur.kind); close() } } }
+                        }
+                        Pick("Skip this session", false, Modifier.fillMaxWidth()) { vm.override(d, "skip"); close() }
+                    }
+                    if (d in e.s.overrides) Pick("Back to the plan", false, Modifier.fillMaxWidth()) { vm.override(d, null); close() }
+                }
+            })
     }
 
     // How the last eight weeks went, oldest on the left.

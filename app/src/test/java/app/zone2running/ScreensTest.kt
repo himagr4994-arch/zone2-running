@@ -3,6 +3,7 @@ package app.zone2running
 import android.graphics.Bitmap
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -50,7 +51,7 @@ class ScreensTest {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
         shot("today")
-        for (t in listOf("PLAN", "LEARN", "PROGRESS", "SETUP")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
+        for (t in listOf("PLAN", "LEARN", "PROGRESS")) { rule.onNodeWithText(t).performClick(); rule.waitForIdle(); shot(t.lowercase()) }
         rule.onNodeWithText("PROGRESS").performClick()
         rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("runs")
         rule.onNodeWithText("Badges").performClick(); rule.waitForIdle(); shot("badges")
@@ -113,6 +114,43 @@ class ScreensTest {
         shot("suggestion-applied")
     }
 
+    @Test @Config(qualifiers = "w400dp-h1500dp-xhdpi") fun liveRunScreens() {
+        val vm = seeded()
+        vm.updateSettings { it.copy(days = (1..7).toList()) }
+        vm.clock = java.time.LocalTime.of(18, 0)
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Start run").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("GUIDED RUN").assertExists(); shot("live-briefing")
+        // The service can't run here, so show the running screen from a snapshot it would publish.
+        Live.snap = LiveSnap(true, false, 1325, 2740.0, 153, 3, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "Connected",
+            listOf(Split(492, 141), Split(478, 146)), 144, "Ease off. Heart rate 153.")
+        rule.waitForIdle(); shot("live-running")
+        rule.onNodeWithText("Above Zone 2. Ease off or walk until you're under 150.").assertExists()
+        Live.snap = LiveSnap(); rule.waitForIdle()
+    }
+
+    @Test @Config(qualifiers = "w400dp-h1700dp-xhdpi") fun swapASessionAndSwitchToMiles() {
+        val vm = seeded()
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("PLAN").performClick(); rule.waitForIdle()
+        rule.onAllNodesWithText("Change")[0].performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Run-walk").performClick(); rule.waitForIdle()
+        assertEquals(1, vm.settings.overrides.size); assertEquals("runwalk", vm.settings.overrides.values.first())
+        shot("plan-swapped")
+        try {
+            vm.updateSettings { it.copy(miles = true, raceName = "City Half", raceDate = today.plusDays(40), raceKm = 21.1) }
+            rule.onNodeWithText("TODAY").performClick(); rule.waitForIdle()
+            rule.onNodeWithText("City Half · 13.1 mi").assertExists(); shot("today-miles-race")
+            rule.onNodeWithText("SETUP").performClick(); rule.waitForIdle(); shot("setup")
+        } finally { U.miles = false }
+    }
+
+    @Test fun forecastParses() {
+        val json = """{"hourly":{"time":["2026-11-17T18:00","2026-11-17T19:00"],"temperature_2m":[29.5,28.1],"dew_point_2m":[21.0,null]}}"""
+        val h = Online.parseForecast(json)
+        assertEquals(1, h.size); assertEquals(29.5 to 21.0, h["2026-11-17T18"])
+    }
+
     @Test fun lessonEarnsXp() {
         val vm = seeded()
         rule.setContent { AppTheme { App(vm) } }
@@ -152,6 +190,8 @@ class ScreensTest {
         rule.onNodeWithText("12 weeks · A new habit").performClick()
         rule.waitForIdle(); shot("guide-remind")
         rule.onNodeWithText("Not now").performClick()
+        rule.waitForIdle(); shot("guide-safe")
+        rule.onNodeWithText("I understand").performClick()
         rule.waitForIdle(); shot("guide-plan")
         rule.onNodeWithText("Start training").performScrollTo().performClick()
         rule.waitForIdle()

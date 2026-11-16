@@ -52,6 +52,7 @@ class Health(private val ctx: Context) {
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
                     distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
                     notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
+                    splits = splits(range, sx.metadata.dataOrigin, sx.startTime),
                     startMin = sx.startTime.atOffset(offset).toLocalTime().let { it.hour * 60 + it.minute },
                 )
             }
@@ -59,6 +60,15 @@ class Health(private val ctx: Context) {
         } while (token != null)
         return out
     }
+
+    /** Per-kilometre splits, when the recording app wrote distance in small enough pieces to work them out. */
+    private suspend fun splits(range: TimeRangeFilter, origin: androidx.health.connect.client.records.metadata.DataOrigin, start: Instant): List<Split> = try {
+        val pieces = client.readRecords(ReadRecordsRequest(DistanceRecord::class, range, setOf(origin))).records
+            .map { Triple(Duration.between(start, it.startTime).seconds, Duration.between(start, it.endTime).seconds, it.distance.inMeters) }
+        val beats = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, range, setOf(origin))).records.flatMap { it.samples }
+            .map { Duration.between(start, it.time).seconds to it.beatsPerMinute.toInt() }
+        splitsFrom(pieces, beats)
+    } catch (e: Exception) { emptyList() }
 
     /** Seconds spent in each zone, from the run's heart-rate samples. Gaps longer than 30 s are not counted. */
     private suspend fun zoneSeconds(range: TimeRangeFilter, origin: androidx.health.connect.client.records.metadata.DataOrigin, zoneOf: (Int) -> Int): List<Int> {

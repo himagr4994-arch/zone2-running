@@ -1,6 +1,6 @@
 # Privacy
 
-Zone 2 Running has no account, no server, no analytics and no trackers. The app does not request the internet permission, so it cannot send anything anywhere.
+Zone 2 Running has no account, no server of its own, no analytics and no trackers. Your runs and settings never leave the phone unless you export or share them yourself.
 
 ## Where your data lives
 
@@ -9,14 +9,38 @@ Zone 2 Running has no account, no server, no analytics and no trackers. The app 
 - Export and Restore read and write a file you pick.
 - Sharing a run hands one picture to the app you choose in the share sheet. Nothing is shared unless you tap Share.
 
+## When the app goes online
+
+Never, unless you switch one of these on. Both are off by default.
+
+| Feature | What is sent | To whom |
+|---|---|---|
+| Weather | The coordinates of the town you typed, a few times a day. The town name once, to look the coordinates up. | Open-Meteo |
+| Update check | A request for the latest release of this app. | GitHub |
+
+No run, heart rate, name or device identifier is included in either request.
+
+## Location
+
+GPS is used only while a live run is in progress, to measure distance. The app keeps the distance and the time of each kilometre. It does not store or send the route.
+
 ## Permissions
 
 | Permission | Why |
 |---|---|
-| Health Connect: read exercise | Find runs recorded by your watch app or other apps |
-| Health Connect: read heart rate | Average and highest heart rate for each run |
-| Health Connect: read distance | Distance for each run |
-| Notifications | The optional daily reminder |
+| Health Connect: read exercise, heart rate, distance | Import runs recorded by other apps. Read-only. |
+| Location | Measure distance during a live run |
+| Foreground service | Keep a live run going with the screen off |
+| Bluetooth | Connect a heart-rate sensor during a live run (optional) |
+| Notifications | The daily reminder, and the run-in-progress notice |
+| Vibration | Cues during a live run |
 | Run at startup | Re-arm the daily reminder after the phone restarts |
+| Internet | Weather and the update check, only when switched on |
 
-Health Connect access is optional and read-only. Zone 2 Running never writes to Health Connect. You can remove access at any time in Android's Health Connect settings.
+Every permission is asked for at the moment it is needed, and the app keeps working if you say no. Health Connect access can be removed at any time in Android's Health Connect settings.
+
+## Crash reports
+
+If the app crashes, the reason is saved to a file on the phone. Nothing is sent. You can copy it from Setup → Help and diagnostics to include in a bug report; it contains the app version, phone model and settings switches, and no runs, heart rates or locations.
+
+Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed CC BY 4.0.

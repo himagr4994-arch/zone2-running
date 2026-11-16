@@ -51,7 +51,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     Panel {
         Head("Target")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Field("Zone 2 pace (min/km)", target, Modifier.weight(1f), "7:00", KeyboardType.Ascii) { target = it }
+            Field("Zone 2 pace (min${U.per})", target, Modifier.weight(1f), fmtPace(420.0), KeyboardType.Ascii) { target = it }
             Field("Reference HR", ref, Modifier.weight(1f), "mid Zone 2") { ref = it }
         }
         Small("Every steady run is converted to the pace you would hold at the reference HR. That number is what the app tracks toward your target.")
@@ -77,11 +77,11 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         }
         if (error.isNotEmpty()) NoteBox(Note("warn", error))
         Btn("Save changes") {
-            val tp = parseDur(target); val mh = maxHr.toIntOrNull() ?: 0; val rh = rest.toIntOrNull() ?: 0
+            val tp = U.paceToKm(parseDur(target)); val mh = maxHr.toIntOrNull() ?: 0; val rh = rest.toIntOrNull() ?: 0
             val rf = ref.toIntOrNull() ?: 0; val z = cz.map { it.toIntOrNull() ?: 0 }
             val em = easy.toIntOrNull() ?: 0; val lm = long.toIntOrNull() ?: 0
             error = when {
-                tp !in 180..900 -> "Enter the target pace like 7:00."
+                tp !in 180..900 -> "Enter the target pace like ${fmtPace(420.0)}."
                 mh !in 120..230 -> "Max HR should be between 120 and 230."
                 rh !in 30..110 || mh - rh < 50 -> "Check resting HR. It should be 30–110 and well below max."
                 ref.isNotBlank() && rf !in 80..200 -> "Reference HR should be 80–200, or leave it blank."
@@ -106,6 +106,39 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         Toggle("One harder session a week", "Needs 4 or more running days.", s.quality) { v -> vm.updateSettings { it.copy(quality = v) } }
         Small("Week 1 of your plan started ${fmtDay(e.planStart)} ${e.planStart.year}.")
         Btn("Restart the plan from this week", ghost = true, small = true) { vm.updateSettings { it.copy(planStart = mondayOf(LocalDate.now())) }; vm.toast = "Plan restarted" }
+    }
+
+    Panel {
+        Head("Units")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Pick("Kilometres", !s.miles, Modifier.weight(1f)) { vm.updateSettings { it.copy(miles = false) } }
+            Pick("Miles", s.miles, Modifier.weight(1f)) { vm.updateSettings { it.copy(miles = true) } }
+        }
+    }
+
+    RacePanel(vm, e)
+
+    Panel {
+        Head("Live run")
+        Toggle("Spoken cues", "Block changes, each kilometre, and a nudge when you leave Zone 2. Vibration stays on either way.", s.voiceOn) { v -> vm.updateSettings { it.copy(voiceOn = v) } }
+        if (s.sensorAddr.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+            Body("Sensor: ${s.sensorName.ifBlank { "saved" }}", modifier = Modifier.weight(1f))
+            Btn("Forget", ghost = true, small = true) { vm.updateSettings { it.copy(sensorAddr = "", sensorName = "") } }
+        } else Small("Pick a heart-rate sensor on the screen before a run starts.")
+    }
+
+    Panel {
+        Head("Weather")
+        var city by remember(s.city) { mutableStateOf(s.city) }
+        if (s.weatherOn) {
+            NoteBox(Note("good", "On for ${s.city}. Hot, humid hours lower the expected pace, and a run in the heat no longer counts against your Zone 2 estimate."))
+            Btn("Turn off", ghost = true, small = true) { vm.weatherOff() }
+        } else {
+            Body("Heat and humidity slow everyone down at the same heart rate. Switch this on and the app allows for it.")
+            Field("Town or city", city, keyboard = KeyboardType.Text, placeholder = "Raipur") { city = it }
+            Btn(if (vm.cityBusy) "Looking it up…" else "Turn on") { vm.setCity(city) }
+        }
+        Small("This is the one feature that uses the internet. The app sends only the town's coordinates, a few times a day, to Open-Meteo. No account, no key. Weather data by Open-Meteo.com (CC BY 4.0).")
     }
 
     Panel {
@@ -161,11 +194,61 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     }
 
     Panel {
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+        var crash by remember { mutableStateOf(Diagnostics.lastCrash(ctx)) }
+        Head("Help and diagnostics")
+        Body(if (crash != null) "The app closed unexpectedly on ${crash!!.lineSequence().first().take(16).replace('T', ' ')}. Copy the report and send it with a line on what you were doing." else "If something goes wrong, copy this report into your message. It holds the app version, phone model and settings switches, and no runs, heart rates or locations.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("Copy report", ghost = true, small = true) { clip.setText(androidx.compose.ui.text.AnnotatedString(Diagnostics.report(ctx, vm.data, vm.healthGranted))); vm.toast = "Report copied" }
+            if (crash != null) Btn("Clear", ghost = true, small = true) { Diagnostics.clear(ctx); crash = null }
+        }
+        if (BuildConfig.UPDATE_REPO.isNotBlank()) Toggle("Check for new versions", "Asks GitHub once when you open the app. Off by default.", s.updateCheck) { v -> vm.updateSettings { it.copy(updateCheck = v) } }
+    }
+
+    Panel {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)
         }
-        Small("Zone 2 Running 0.4.0 · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+        Small("Zone 2 Running ${BuildConfig.VERSION_NAME} · open source under the MIT licence · not medical advice. Check with a doctor before starting a new training plan if you have a health condition.")
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RacePanel(vm: AppVM, e: Engine) {
+    val p = LocalPal.current
+    val s = vm.settings
+    var name by remember(s.raceName) { mutableStateOf(s.raceName) }
+    var km by remember(s.raceKm) { mutableStateOf(s.raceKm) }
+    var date by remember(s.raceDate) { mutableStateOf(s.raceDate) }
+    var picking by remember { mutableStateOf(false) }
+    Panel {
+        Head("Race goal")
+        Body("Optional. Pick an event and the plan builds toward it, tapers over the last two weeks and puts the race on your calendar.", p.muted)
+        Field("Event name", name, keyboard = KeyboardType.Text, placeholder = "City half marathon") { name = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("5K" to 5.0, "10K" to 10.0, "Half" to 21.1, "Marathon" to 42.2).forEach { (n, d) -> Pick(n, km == d, Modifier.weight(1f)) { km = d } }
+        }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).border(1.dp, p.line, RoundedCornerShape(10.dp)).clickable { picking = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { Small("Race date"); Body(date?.let { "${DOW[it.dayOfWeek.value - 1]} ${fmtDay(it)} ${it.year}" } ?: "Not set") }
+            Small("Choose", p.accent)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Btn("Save race") {
+                val d = date
+                if (km <= 0 || d == null) vm.toast = "Pick a distance and a date" else if (d.isBefore(LocalDate.now())) vm.toast = "That date has passed" else { vm.setRace(name, d, km); vm.toast = "Race saved" }
+            }
+            if (s.raceDate != null) Btn("Remove", ghost = true) { vm.setRace("", null, 0.0) }
+        }
+        e.raceDaysLeft?.let { Small("${it} day${if (it == 1) "" else "s"} to go." + (e.racePrediction()?.let { t -> " Projected finish about ${fmtDur(t)}, from your hardest recent run." } ?: ""), p.ink) }
+    }
+    if (picking) {
+        val st = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = (date ?: LocalDate.now().plusWeeks(12)).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+        androidx.compose.material3.DatePickerDialog(onDismissRequest = { picking = false }, confirmButton = {
+            TextButton({ st.selectedDateMillis?.let { date = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate() }; picking = false }) { Text("OK") }
+        }) { androidx.compose.material3.DatePicker(st) }
     }
 }
 
@@ -191,7 +274,7 @@ fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) 
     if (denied) Small("Notifications are blocked for this app. You can allow them in Android settings.")
 }
 
-private val LEVELS = listOf(Triple("Just starting", "Under 10 km a week", Triple(25, 40, false)), Triple("Running regularly", "10–25 km a week", Triple(35, 60, true)), Triple("Experienced", "More than 25 km a week", Triple(45, 80, true)))
+private val LEVELS = listOf(Triple("Just starting", "Under 10 km a week|Under 6 miles a week", Triple(25, 40, false)), Triple("Running regularly", "10–25 km a week|6–15 miles a week", Triple(35, 60, true)), Triple("Experienced", "More than 25 km a week|More than 15 miles a week", Triple(45, 80, true)))
 
 /** A big tappable answer. */
 @Composable
@@ -231,7 +314,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
     val s0 = vm.settings
     val today = LocalDate.now()
     val logged = remember { vm.engine().eligible.lastOrNull { it.first.id != "_base" }?.first }
-    val steps = remember { listOfNotNull("age", "rest", if (logged == null) "now" else null, "target", "level", "days", "long", "commit", "remind", "plan") }
+    val steps = remember { listOfNotNull("age", "rest", if (logged == null) "now" else null, "target", "level", "days", "long", "commit", "remind", if (s0.disclaimerOk) null else "safe", "plan") }
     var at by remember { mutableIntStateOf(0) }
     val step = steps[at]
 
@@ -264,7 +347,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
             basePace = if (base) cur else if (logged == null) 0 else s0.basePace, baseHr = if (base) hr else if (logged == null) 0 else s0.baseHr,
             baseDate = if (base) (s0.baseDate ?: today) else s0.baseDate,
             days = days.sorted(), longDay = if (longDay in days) longDay else days.maxOrNull() ?: 7, easyMin = easy, longMin = long, quality = quality,
-            planStart = s0.planStart ?: mondayOf(today), onboarded = true, goalWeeks = goalWeeks, remindOn = remind, remindMin = remindMin,
+            planStart = s0.planStart ?: mondayOf(today), onboarded = true, disclaimerOk = true, goalWeeks = goalWeeks, remindOn = remind, remindMin = remindMin,
         )
     }
     val preview = Engine(built(), vm.data.runs, today)
@@ -282,6 +365,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
         "long" -> "Which day suits your longest run?"
         "commit" -> "Easy running pays off over weeks. How long will you give it?"
         "remind" -> "Want a nudge on run days?"
+        "safe" -> "One honest thing before we start."
         else -> "Here's your plan."
     }
 
@@ -319,26 +403,26 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                     Choice("Not yet", "I'll log or import a run first.", false) { knowNow = false; next() }
                     if (knowNow) {
                         Small("Average pace of that run")
-                        Dial(cur, 210, 780, 5, "/km", { fmtPace(it.toDouble()) }) { cur = it }
+                        Dial(cur, 210, 780, 5, "${U.per}", { fmtPace(it.toDouble()) }) { cur = it }
                         Small("Average heart rate on it")
                         Dial(hr, 95, 200, unit = "bpm") { hr = it }
-                        now?.let { NoteBox(Note("good", "So at an easy ${preview.refHr} bpm you'd run about ${fmtPace(it)} per km today. That's your starting line.")) }
+                        now?.let { NoteBox(Note("good", "So at an easy ${preview.refHr} bpm you'd run about ${fmtPace(it)} per ${U.word} today. That's your starting line.")) }
                     }
                 }
                 "target" -> {
                     if (now != null) {
-                        Small("Your Zone 2 pace today is about ${fmtPace(now)} /km.")
+                        Small("Your Zone 2 pace today is about ${fmtPace(now)} ${U.per}.")
                         listOf(Triple(45, "A steady step", "3–5"), Triple(75, "Ambitious", "4–8"), Triple(105, "A big goal", "6–11")).forEachIndexed { i, (gain, name, months) ->
                             val t = round5(now - gain).coerceAtLeast(210)
-                            Choice("${fmtPace(t.toDouble())} /km · $name", "$gain seconds faster. Usually about $months months.", targetPick == i) { targetPick = i; target = t }
+                            Choice("${fmtPace(t.toDouble())} ${U.per} · $name", "${U.s(gain)} seconds faster. Usually about $months months.", targetPick == i) { targetPick = i; target = t }
                         }
                         Choice("My own number", "", targetPick == 3) { targetPick = 3 }
                     }
-                    if (now == null || targetPick == 3) Dial(target, 210, 720, 5, "/km", { fmtPace(it.toDouble()) }) { target = it; targetPick = 3 }
-                    Small("For scale: the average marathon finisher races at about 6:24 /km, and their easy Zone 2 pace is roughly 7:00 to 7:45.")
+                    if (now == null || targetPick == 3) Dial(target, 210, 720, 5, "${U.per}", { fmtPace(it.toDouble()) }) { target = it; targetPick = 3 }
+                    Small("For scale: the average marathon finisher races at about ${fmtPace(384.0)} ${U.per}, and their easy Zone 2 pace is roughly ${fmtPace(420.0)} to ${fmtPace(465.0)}.")
                 }
                 "level" -> LEVELS.forEachIndexed { i, (name, sub, v) ->
-                    Choice(name, sub, level == i) { level = i; easy = v.first; long = v.second; quality = v.third; next() }
+                    Choice(name, sub.split("|")[if (U.miles) 1 else 0], level == i) { level = i; easy = v.first; long = v.second; quality = v.third; next() }
                 }
                 "days" -> {
                     DayPicker(days) { d -> days = if (d in days) days - d else days + d }
@@ -362,6 +446,11 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                     Small("A week counts when you finish about three-quarters of its runs. Miss one and a rest pass covers it.")
                 }
                 "remind" -> ReminderPicker(remind, remindMin) { on, m -> remind = on; remindMin = m }
+                "safe" -> {
+                    Body("I'm a training guide, not a doctor. Heart-rate zones and pace estimates here are rough, and they come from formulas, not from testing you.")
+                    Body("Talk to a doctor before starting if you have a heart condition, chest pain, dizziness or fainting, are pregnant, or are coming back from illness or injury.")
+                    Body("On any run: if something feels wrong, stop.")
+                }
                 else -> {
                     val tg = preview.s.targetPace.toDouble(); val gap = (now ?: tg) - tg
                     val plan = preview.weekPlan(mondayOf(today))
@@ -373,7 +462,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                         }
                         Body(when {
                             now == null -> "Log or import your first run and I'll work out where you're starting from."
-                            gap > 0 -> "That is ${fmtPace(gap)} per km to gain at ${preview.refHr} bpm. Runners typically gain 10–20 s/km a month with consistent easy running, so plan for about ${max(1, (gap / 20).roundToInt())}–${max(2, (gap / 10).roundToInt())} months."
+                            gap > 0 -> "That is ${fmtPace(gap)} per km to gain at ${preview.refHr} bpm. Runners typically gain ${U.s(10)}–${U.s(20)} s${U.per} a month with consistent easy running, so plan for about ${max(1, (gap / 20).roundToInt())}–${max(2, (gap / 10).roundToInt())} months."
                             else -> "You already hold this pace in Zone 2. Go back and pick a faster target, or keep it and use the plan to stay there."
                         })
                         Label("Week 1 · ${plan.total} minutes")
@@ -400,7 +489,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
         if (at > 0 || canClose) Btn(if (at == 0) "Close" else "Back", ghost = true) { error = ""; if (at == 0) close() else at-- }
         Spacer(Modifier.weight(1f))
         val tapOnly = step == "level" && level < 0      // nothing to confirm until a card is tapped
-        if (!tapOnly) Btn(when (step) { "plan" -> "Start training"; "remind" -> if (remind) "Next" else "Not now"; else -> "Next" }) {
+        if (!tapOnly) Btn(when (step) { "plan" -> "Start training"; "remind" -> if (remind) "Next" else "Not now"; "safe" -> "I understand"; else -> "Next" }) {
             error = when {
                 step == "days" && days.size < 2 -> "Pick at least two running days."
                 step == "age" && knowMax && maxHr - rest < 50 -> "Max and resting heart rate are too close. Check them."

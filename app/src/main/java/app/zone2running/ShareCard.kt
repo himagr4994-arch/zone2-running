@@ -41,9 +41,9 @@ object ShareCard {
 
         cv.drawText(fmtPace(paceOf(r)), m, 520f, paint(ink, 300f, display))
         val pw = paint(ink, 300f, display).measureText(fmtPace(paceOf(r)))
-        cv.drawText("/km", m + pw + 24f, 520f, paint(muted, 76f, semi))
+        cv.drawText("${U.per}", m + pw + 24f, 520f, paint(muted, 76f, semi))
 
-        val stats = listOf(f2(r.distKm) to "KM", fmtDur(r.durSec) to "TIME", (if (r.avgHr > 0) "${r.avgHr}" else "–") to (if (c.zone > 0) "BPM · Z${c.zone}" else "BPM"))
+        val stats = listOf(f2(U.k(r.distKm)) to U.unit.uppercase(), fmtDur(r.durSec) to "TIME", (if (r.avgHr > 0) "${r.avgHr}" else "–") to (if (c.zone > 0) "BPM · Z${c.zone}" else "BPM"))
         stats.forEachIndexed { i, (v, l) ->
             val x = m + i * (w - 2 * m) / 3f
             cv.drawText(v, x, 690f, paint(ink, 96f, semi)); cv.drawText(l, x, 740f, paint(muted, 32f, body).apply { letterSpacing = .08f })

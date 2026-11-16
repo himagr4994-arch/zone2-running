@@ -19,8 +19,10 @@ android {
         applicationId = "app.zone2running"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.0"
+        versionCode = 6
+        versionName = "0.5.0"
+        // "owner/repository" on GitHub. Leave empty to hide the update check.
+        buildConfigField("String", "UPDATE_REPO", "\"\"")
     }
     signingConfigs {
         if (keystoreProps.containsKey("storeFile")) {
@@ -43,7 +45,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     lint { checkReleaseBuilds = false }
     testOptions {
         unitTests {

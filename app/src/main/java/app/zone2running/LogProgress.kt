@@ -61,7 +61,7 @@ fun LogScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)} · ${TYPE_NAMES[r.type] ?: "Run"}", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, fontFamily = BodyFont)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Small("${f2(r.distKm)} km · ${fmtDur(r.durSec)}")
+                        Small("${U.dist(r.distKm)} · ${fmtDur(r.durSec)}")
                         if (z > 0) { Dot(p.zones[z - 1]); Small("Z$z, ${r.avgHr} bpm") }
                     }
                 }
@@ -79,9 +79,10 @@ fun LogScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
 fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
     val p = LocalPal.current
     val r0 = seed.run
+    val isNew = r0 == null || seed.fresh
     var date by remember { mutableStateOf(r0?.date ?: seed.date) }
     var type by remember { mutableStateOf(r0?.type ?: seed.type) }
-    var dist by remember { mutableStateOf(r0?.let { f2(it.distKm) } ?: "") }
+    var dist by remember { mutableStateOf(r0?.takeIf { it.distKm > 0 }?.let { f2(U.k(it.distKm)) } ?: "") }
     var time by remember { mutableStateOf(r0?.let { fmtDur(it.durSec) } ?: "") }
     var hr by remember { mutableStateOf(r0?.avgHr?.takeIf { it > 0 }?.toString() ?: "") }
     var maxHr by remember { mutableStateOf(r0?.maxHr?.takeIf { it > 0 }?.toString() ?: "") }
@@ -93,11 +94,14 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
     var confirmDelete by remember { mutableStateOf(false) }
 
     fun draft() = Run(r0?.id ?: "run_${date.toString().replace("-", "")}_${System.currentTimeMillis().toString(36)}", date, type,
-        ((dist.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).roundToInt() / 100.0, parseDur(time), hr.toIntOrNull() ?: 0, maxHr.toIntOrNull() ?: 0,
-        feel, notes.trim().take(500), r0?.source ?: "manual", r0?.zoneSec ?: emptyList(), startMin)
+        (U.toKm(dist.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).roundToInt() / 100.0, parseDur(time), hr.toIntOrNull() ?: 0, maxHr.toIntOrNull() ?: 0,
+        feel, notes.trim().take(500), r0?.source ?: "manual", r0?.zoneSec ?: emptyList(), startMin, r0?.splits ?: emptyList(), r0?.heatPct ?: 0.0)
 
     Panel {
-        Head(if (r0 == null) "Log a run" else "Edit run")
+        Head(if (seed.fresh) "Finish logging your run" else if (r0 == null) "Log a run" else "Edit run")
+        if (seed.fresh) NoteBox(Note("warn", "GPS didn't record a distance. Add it and the run is saved with its time and heart rate."))
+        if (r0 != null && r0.splits.isNotEmpty()) { Small("Kilometre splits and average heart rate"); SplitBars(r0.splits) }
+        if (r0 != null && r0.heatPct >= 1.5) Small("Weather that hour slowed running by roughly ${f1(r0.heatPct)}%. The Zone 2 estimate allows for it.", p.ink)
         if (r0 != null && r0.zoneSec.size == 5 && r0.zoneSec.sum() > 0) {
             val tot = r0.zoneSec.sum().toFloat()
             Small("Time in each zone, from your heart-rate samples")
@@ -114,7 +118,7 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
         val types = TYPE_NAMES.entries.filter { it.key != "baseline" }
         types.chunked(3).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { (k, v) -> Pick(v.removeSuffix(" run").replace("Long easy", "Long").replace("Steady / tempo", "Tempo").replace("Hard effort", "Hard"), type == k, Modifier.weight(1f)) { type = k } } } }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Field("Distance (km)", dist, Modifier.weight(1f), "10.26", KeyboardType.Decimal) { dist = it }
+            Field("Distance (${U.unit})", dist, Modifier.weight(1f), if (U.miles) "6.2" else "10.26", KeyboardType.Decimal) { dist = it }
             Field("Time", time, Modifier.weight(1f), "1:11:37", KeyboardType.Ascii) { time = it }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -134,10 +138,10 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
         Field("Notes (heat, route, sleep)", notes, keyboard = KeyboardType.Text, singleLine = false) { notes = it }
         val d = draft()
         val preview = if (d.distKm > 0 && d.durSec > 0) buildString {
-            append("Pace ${fmtPace(paceOf(d))} /km")
+            append("Pace ${fmtPace(paceOf(d))} ${U.per}")
             if (d.avgHr > 0) {
                 append(" · Zone ${e.zoneOf(d.avgHr)}")
-                e.est(d)?.let { append(" · Zone 2 estimate ${fmtPace(it)} /km") } ?: if (d.type == "intervals") append(" · intervals are left out of the estimate") else Unit
+                e.est(d)?.let { append(" · Zone 2 estimate ${fmtPace(it)} ${U.per}") } ?: if (d.type == "intervals") append(" · intervals are left out of the estimate") else Unit
             }
         } else "Enter distance, time and average HR to see pace, zone and your Zone 2 estimate."
         NoteBox(Note("plain", preview))
@@ -146,16 +150,16 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
             Btn("Save run") {
                 val r = draft()
                 error = when {
-                    r.distKm <= 0 -> "Enter the distance in km."
+                    r.distKm <= 0 -> "Enter the distance in ${U.unit}."
                     r.durSec <= 0 -> "Enter the time, like 45:30 or 1:11:37."
                     r.avgHr != 0 && r.avgHr !in 60..230 -> "Average HR looks off. Check it."
                     r.date.isAfter(LocalDate.now()) -> "That date is in the future."
                     else -> ""
                 }
-                if (error.isEmpty()) { vm.saveRun(r, isNew = r0 == null); close() }
+                if (error.isEmpty()) { vm.saveRun(r, isNew = isNew); close() }
             }
             Btn("Cancel", ghost = true, onClick = close)
-            if (r0 != null) Btn(if (confirmDelete) "Tap again to delete" else "Delete", danger = true) {
+            if (!isNew && r0 != null) Btn(if (confirmDelete) "Tap again to delete" else "Delete", danger = true) {
                 if (confirmDelete) { vm.deleteRun(r0.id); close() } else confirmDelete = true
             }
         }
@@ -220,8 +224,8 @@ fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
         if (cur != null && cur > tg) Small(if (tr != null && tr.b < -0.02) {
             val days = ((tg - tr.a) / tr.b).roundToInt()
             if (days > 1100) "Your trend is nearly flat. More easy volume is the lever."
-            else tr.t0.plusDays(days.toLong()).let { "On this trend you reach ${fmtPace(tg)} around ${MONTHS[it.monthValue - 1]} ${it.year}, improving ${(-tr.b * 30).roundToInt()} s/km a month." }
-        } else "Typical progress is 10–20 s/km a month. A personal projection appears after 4 steady runs across 3 weeks.", p.ink)
+            else tr.t0.plusDays(days.toLong()).let { "On this trend you reach ${fmtPace(tg)} around ${MONTHS[it.monthValue - 1]} ${it.year}, improving ${U.s((-tr.b * 30).roundToInt())} s${U.per} a month." }
+        } else "Typical progress is ${U.s(10)}–${U.s(20)} s${U.per} a month. A personal projection appears after 4 steady runs across 3 weeks.", p.ink)
     }
 
     Panel(Modifier.rise(2)) {
@@ -254,7 +258,7 @@ fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
         val d = picked
         Small(if (d == null) "Each column is a week, Monday at the top. Darker means longer. Tap a day." else "${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)}: " + e.runsOn(d).let { rs ->
             if (rs.isEmpty()) (if (d.isAfter(e.today)) "still to come." else "no run.")
-            else rs.joinToString("; ") { r -> "${TYPE_NAMES[r.type] ?: "Run"}, ${f2(r.distKm)} km at ${fmtPace(paceOf(r))}" + if (r.avgHr > 0) ", ${r.avgHr} bpm" else "" }
+            else rs.joinToString("; ") { r -> "${TYPE_NAMES[r.type] ?: "Run"}, ${U.dist(r.distKm)} at ${fmtPace(paceOf(r))}" + if (r.avgHr > 0) ", ${r.avgHr} bpm" else "" }
         })
     }
 
@@ -262,10 +266,10 @@ fun ProgressScreen(vm: AppVM, e: Engine, openForm: (FormSeed) -> Unit) {
         Head("Personal records", 18)
         if (e.runs.isEmpty()) Body("Records appear after your first run.", p.muted)
         else listOfNotNull(
-            "Longest run" to "${f2(g.longest)} km", "Longest time on feet" to fmtDur(g.longSec),
-            "Best Zone 2 estimate" to (g.bestEst?.let { "${fmtPace(it)} /km" } ?: "–"), "Fastest run, 3 km+" to (g.fast?.let { "${fmtPace(it)} /km" } ?: "–"),
-            "Biggest week" to "${f1(g.bigWeek)} km", if (gameOn) "Longest streak" to "${g.best} week${if (g.best == 1) "" else "s"}" else null,
-            "Total distance" to "${f1(g.km)} km",
+            "Longest run" to "${U.dist(g.longest)}", "Longest time on feet" to fmtDur(g.longSec),
+            "Best Zone 2 estimate" to (g.bestEst?.let { "${fmtPace(it)} ${U.per}" } ?: "–"), "Fastest run, 3 km+" to (g.fast?.let { "${fmtPace(it)} ${U.per}" } ?: "–"),
+            "Biggest week" to "${U.dist(g.bigWeek, 1)}", if (gameOn) "Longest streak" to "${g.best} week${if (g.best == 1) "" else "s"}" else null,
+            "Total distance" to "${U.dist(g.km, 1)}",
         ).forEachIndexed { i, (k, v) ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
             Row(verticalAlignment = Alignment.CenterVertically) { Body(k, modifier = Modifier.weight(1f)); Text(v, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, color = p.ink) }

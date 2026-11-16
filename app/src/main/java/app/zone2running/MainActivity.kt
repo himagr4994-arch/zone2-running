@@ -49,16 +49,21 @@ class MainActivity : ComponentActivity() {
 }
 
 /** What the run form opens with: an existing run to edit, or a date and type to pre-fill. */
-data class FormSeed(val run: Run? = null, val date: LocalDate = LocalDate.now(), val type: String = "easy")
+data class FormSeed(val run: Run? = null, val date: LocalDate = LocalDate.now(), val type: String = "easy", val fresh: Boolean = false)
 
 val TABS = listOf("Today", "Plan", "Learn", "Progress", "Setup")
 
 @Composable
 fun App(vm: AppVM) {
     val p = LocalPal.current
-    val e = remember(vm.data) { vm.engine() }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val e = remember(vm.data, vm.wxTick) { vm.engine() }
     var form by remember { mutableStateOf<FormSeed?>(null) }
+    var live by remember { mutableStateOf<Session?>(null) }
+    // A finished live run arrives here: save it, or ask for the distance when GPS recorded none.
+    LaunchedEffect(Live.result) {
+        Live.result?.let { r -> Live.result = null; live = null; if (r.distKm >= 0.1) vm.saveRun(r, isNew = true) else form = FormSeed(run = r, fresh = true) }
+    }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var lesson by remember { mutableStateOf<Lesson?>(null) }
     var rerunGuide by remember { mutableStateOf(false) }
     var replayIntro by remember { mutableStateOf(false) }
@@ -73,15 +78,17 @@ fun App(vm: AppVM) {
 
     val guide = !vm.settings.onboarded || rerunGuide
     val reward = vm.celebration
-    val chrome = !guide && reward == null && form == null && lesson == null
-    BackHandler(enabled = form != null || lesson != null || reward != null || (guide && vm.settings.onboarded)) {
-        when { form != null -> form = null; lesson != null -> lesson = null; reward != null -> vm.celebration = null; else -> rerunGuide = false }
+    val running = Live.snap.active || live != null
+    val chrome = !guide && reward == null && form == null && lesson == null && !running
+    BackHandler(enabled = form != null || lesson != null || reward != null || (live != null && !Live.snap.active) || (guide && vm.settings.onboarded)) {
+        when { live != null -> live = null; form != null -> form = null; lesson != null -> lesson = null; reward != null -> vm.celebration = null; else -> rerunGuide = false }
     }
 
     Scaffold(containerColor = p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(tab) { tab = it } }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
             when {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
+                running && reward == null && form == null -> Page { LiveScreen(vm, e, live) { live = null } }
                 reward != null -> Box {
                     Page { RewardScreen(reward, share = { vm.shareRun(reward) }) { vm.celebration = null; tab = 0 } }
                     if (reward.celebrate) Confetti()
@@ -95,7 +102,7 @@ fun App(vm: AppVM) {
                     Page {
                         TopBar(e, vm.settings.gameOn) { tab = 3 }
                         when (t) {
-                            0 -> TodayScreen(vm, e, openPlan = { tab = 1 }, openSetup = { tab = 4 }, openLesson = { lesson = it }) { form = it }
+                            0 -> TodayScreen(vm, e, openPlan = { tab = 1 }, openSetup = { tab = 4 }, openLesson = { lesson = it }, openLive = { live = it }) { form = it }
                             1 -> PlanScreen(vm, e) { form = it }
                             2 -> LearnScreen(vm.settings) { lesson = it }
                             3 -> ProgressScreen(vm, e) { form = it }

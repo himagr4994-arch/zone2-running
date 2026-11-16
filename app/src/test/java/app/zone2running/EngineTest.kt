@@ -196,4 +196,104 @@ class EngineTest {
         assertTrue(Engine(base.copy(remindOn = true, remindMin = 1080), mondayRunner(), today).suggestions().isEmpty())
         assertEquals("6:30 am", fmtClock(390)); assertEquals("12 pm", fmtClock(720)); assertEquals("12:15 am", fmtClock(15))
     }
+
+    @Test fun milesChangeOnlyWhatIsShown() {
+        try {
+            U.miles = true
+            assertEquals("11:16", fmtPace(420.0)); assertEquals("6.21 mi", U.dist(10.0)); assertEquals(24, U.s(15)); assertEquals(420, U.paceToKm(676))
+            assertEquals(10.0, U.toKm(6.2137), .01)
+        } finally { U.miles = false }
+        assertEquals("7:00", fmtPace(420.0)); assertEquals("10.00 km", U.dist(10.0))
+    }
+
+    @Test fun raceTapersThePlanAndLandsOnTheDay() {
+        val race = today.plusDays(13)                                   // Sunday of next week
+        val e = Engine(s.copy(planStart = today, raceName = "City Half", raceDate = race, raceKm = 21.1), listOf(tenK), today)
+        val taper = e.weekPlan(today)
+        assertEquals("Taper", taper.phase); assertTrue(taper.ses[7]!!.min < 70)
+        val raceWeek = e.weekPlan(today.plusWeeks(1))
+        assertEquals("Race week", raceWeek.phase)
+        assertEquals("race", raceWeek.ses[7]!!.type); assertEquals("City Half", raceWeek.ses[7]!!.title)
+        assertTrue(raceWeek.ses.filterKeys { it < 7 }.values.all { it.kind == "easy" })
+        assertEquals(13, e.raceDaysLeft)
+        val projected = e.racePrediction()!!                             // Riegel from the 10.26 km in 1:11:37
+        assertTrue(projected in 9100..9350)
+        assertEquals("Build 1", e.weekPlan(today.plusWeeks(2)).phase.let { if (it.startsWith("Build") || it.startsWith("Recovery")) "Build 1" else it })
+    }
+
+    @Test fun sessionsCanBeSwappedMovedAndSkipped() {
+        val tue = today.plusDays(1); val wed = today.plusDays(2); val thu = today.plusDays(3)
+        val e = Engine(s.copy(planStart = today, overrides = mapOf(tue to "tempo", thu to "skip", wed to "4x4")), listOf(tenK), today)
+        val p = e.weekPlan(today)
+        assertEquals("tempo", p.ses[2]!!.type); assertEquals("4x4", p.ses[3]!!.kind); assertNull(p.ses[4])
+        assertEquals(listOf(2, 3, 6, 7), p.ses.keys.toList())
+        assertEquals(e.weekPlan(today.plusWeeks(1)).ses.keys.toList(), listOf(2, 4, 6, 7))      // other weeks are untouched
+    }
+
+    @Test fun guidedStepsAddUp() {
+        val e = Engine(s, listOf(tenK), today)
+        val p = e.weekPlan(today)
+        val intervals = e.steps(p.ses[4]!!)
+        assertEquals(600 + 4 * (240 + 180) + 600, intervals.sumOf { it.sec })
+        assertEquals(4, intervals.count { it.kind == "hard" })
+        val easy = e.steps(p.ses[2]!!)
+        assertEquals(40 * 60, easy.sumOf { it.sec }); assertTrue(easy.all { it.zHi <= 2 })
+        val walk = e.steps(Session("easy", "Easy run-walk", 40, "", "runwalk"))
+        assertEquals(16, walk.size); assertEquals("Walk", walk[1].label)
+        assertEquals(1800, e.steps(p.copy().let { e.weekPlan(today.plusWeeks(3)).ses.values.first { it.type == "test" } }).last().sec)
+    }
+
+    @Test fun splitsComeFromFinePiecesOnly() {
+        val pieces = (0 until 11).map { Triple(it * 100L, it * 100L + 100, 250.0) }          // 2.75 km at 400 s per km
+        val beats = (0 until 1100 step 10).map { it.toLong() to if (it < 400) 140 else 150 }
+        val sp = splitsFrom(pieces, beats)
+        assertEquals(listOf(400, 400), sp.map { it.sec }); assertEquals(140, sp[0].hr); assertEquals(150, sp[1].hr)
+        assertTrue(splitsFrom(listOf(Triple(0L, 3000L, 6000.0)), beats).isEmpty())            // one big lump can't be split honestly
+    }
+
+    @Test fun heatSlowsTheExpectationNotTheEstimate() {
+        assertEquals(.75, heatPct(20.0, 10.0), .001); assertEquals(7.0, heatPct(32.0, 24.0), .001); assertEquals(0.0, heatPct(10.0, 5.0), .001)
+        val cool = Run("c", today, "easy", 6.0, 3000, 143); val hot = cool.copy(id = "h", heatPct = 7.0)
+        val e = Engine(s, listOf(cool), today)
+        assertEquals(e.est(cool)!! / 1.07, e.est(hot)!!, .01)
+        val lead = Engine(s.copy(planStart = today.minusWeeks(1)), easyWeek(1), today.plusDays(1), Wx { _, _ -> 33.0 to 25.0 }).lead(at(17))
+        assertTrue(lead.body.contains("% slower")); assertTrue(lead.heatPct >= 7.0)
+        assertEquals(0.0, Engine(s.copy(planStart = today.minusWeeks(1)), easyWeek(1), today.plusDays(1)).lead(at(17)).heatPct, .0)
+    }
+
+    private val zb = listOf(124, 137, 150, 162, 175)
+
+    @Test fun trackerFollowsStepsAndCuesAboveTheCap() {
+        val t = RunTracker(listOf(Step("Warm up", 60, 1, 2, "warm"), Step("Hard", 30, 4, 4, "hard")), zb)
+        val events = ArrayList<LiveEvent>()
+        repeat(60) { events += t.tick(if (it < 30) 140 else 155) }
+        assertEquals(1, t.stepIndex)
+        assertTrue(events.any { it.kind == "step" && it.text.startsWith("Hard, 30 seconds") })
+        assertEquals(1, events.count { it.kind == "cap" })                                    // one cue after 20 s above 150, not thirty
+        repeat(30) { events += t.tick(170) }
+        assertTrue(events.last().kind == "done")
+        assertEquals(1, events.count { it.kind == "cap" })                                    // no cap cue during the hard block
+        assertEquals(90, t.elapsed); assertEquals(30, t.zoneSec[1]); assertEquals(30, t.zoneSec[2]); assertEquals(30, t.zoneSec[3])
+    }
+
+    @Test fun trackerMeasuresDistanceAndSplits() {
+        val t = RunTracker(emptyList(), zb)
+        val step = 3.0 / 111_320.0                                                           // 3 m of latitude
+        var km: LiveEvent? = null
+        for (i in 0..400) { t.tick(142); t.fix(21.25 + i * step, 81.63, 6f, i * 1000L)?.let { km = it } }
+        assertEquals(1200.0, t.meters, 6.0)
+        assertEquals(1, t.splits.size); assertTrue(t.splits[0].sec in 332..336); assertEquals(142, t.splits[0].hr)
+        assertTrue(km!!.text.startsWith("Kilometre 1."))
+        assertEquals(333.0, t.paceNow()!!, 4.0)
+        val before = t.meters
+        t.fix(21.30, 81.63, 6f, 402_000L)                                                    // a 5 km jump in one second is thrown away
+        t.fix(21.30 + step, 81.63, 80f, 403_000L)                                            // and so is a fix with poor accuracy
+        assertEquals(before, t.meters, .001)
+        val r = t.toRun(today, "easy", 1140)
+        assertEquals(1.2, r.distKm, .01); assertEquals("live", r.source); assertEquals(1, r.splits.size); assertEquals(1140, r.startMin)
+    }
+
+    @Test fun versionsCompareNumberByNumber() {
+        assertTrue(Online.newer("0.10.0", "0.9.3")); assertTrue(Online.newer("1.0", "0.9.9")); assertTrue(!Online.newer("0.5.0", "0.5.0")); assertTrue(!Online.newer("0.4.9", "0.5.0"))
+    }
 }

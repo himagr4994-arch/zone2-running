@@ -117,7 +117,11 @@ for i in range(30):
         break
     pick = next((a for a in answers if any(a.lower() in t.lower() for t in seen)), None)
     if pick is None:
-        fail(f"setup is stuck. On screen: {seen[:40]}")
+        # The button may be below the fold: scroll down and look again.
+        adb("shell", "input", "swipe", "500", "1700", "500", "500", "300"); time.sleep(1)
+        seen = texts(); pick = next((a for a in answers if any(a.lower() in t.lower() for t in seen)), None)
+        if pick is None:
+            fail(f"setup is stuck. On screen: {seen[:40]}")
     if pick == "Start training":
         shot("plan-preview")
     tap(pick)

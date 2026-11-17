@@ -63,7 +63,13 @@ def has(label):
 
 
 def tap(label, last=False, must=True):
-    hits = [(t, x, y) for t, x, y in nodes() if t.lower() == label.lower()] or [(t, x, y) for t, x, y in nodes() if label.lower() in t.lower()]
+    def find():
+        seen = nodes()
+        return [(t, x, y) for t, x, y in seen if t.lower() == label.lower()] or [(t, x, y) for t, x, y in seen if label.lower() in t.lower()]
+    hits = find()
+    if not hits and must:                         # it may be below the fold: scroll once and look again
+        adb("shell", "input", "swipe", "500", "1600", "500", "700", "300"); time.sleep(1.2)
+        hits = find()
     if not hits:
         if must:
             fail(f"nothing to tap called '{label}'. On screen: {texts()[:40]}")

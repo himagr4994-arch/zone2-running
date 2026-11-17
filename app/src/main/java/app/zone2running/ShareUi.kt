@@ -55,7 +55,11 @@ fun SharePicker(vm: AppVM, e: Engine, r: Run, close: () -> Unit) {
         Head("Share this run", modifier = Modifier.weight(1f).padding(start = 4.dp))
         Pick("Story", story) { story = true }; Spacer(Modifier.width(6.dp)); Pick("Post", !story) { story = false }
     }
-    HorizontalPager(pager, Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = if (story) 62.dp else 28.dp), pageSpacing = 14.dp) { i ->
+    // The preview is kept to about half the screen's height, so the buttons under it are in reach without scrolling.
+    val screen = androidx.compose.ui.platform.LocalConfiguration.current
+    val tall = (screen.screenHeightDp * .5f).dp
+    val wide = minOf(tall * (ShareCard.W / ShareCard.height(0, story).toFloat()), (screen.screenWidthDp - 36 - 40).dp)
+    HorizontalPager(pager, Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = ((screen.screenWidthDp - 36).dp - wide) / 2), pageSpacing = 14.dp) { i ->
         // The look on screen plays its animation once when you land on it, so you can see what the video will do.
         val play = remember(i, story, photo) { androidx.compose.animation.core.Animatable(1f) }
         LaunchedEffect(pager.currentPage, story, photo) { if (pager.currentPage == i && Motion.on && ShareCard.canAnimate(i, photo != null)) { play.snapTo(0f); play.animateTo(1f, androidx.compose.animation.core.tween(3200, easing = androidx.compose.animation.core.LinearEasing)) } }

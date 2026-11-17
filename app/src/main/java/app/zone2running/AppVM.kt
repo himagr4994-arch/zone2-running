@@ -34,7 +34,7 @@ fun buildCelebration(before: Engine, after: Engine, fresh: List<Run>): Celebrati
     val easyType = r.type in setOf("easy", "long", "test")
     val msg = when {
         easyType && z in 1..2 -> "Kept in Zone 2. This is the kind of run that moves your easy pace."
-        easyType && z >= 3 -> "Average HR landed in Zone $z. On the next easy run, slow down or walk until it stays under ${after.zb[2]} bpm. Easy minutes earn double XP."
+        easyType && z >= 3 -> "Average HR landed in Zone $z. On the next easy run, slow down or walk until it stays under ${after.zb[2]} bpm."
         r.type == "test" -> "Benchmark recorded."
         else -> "Hard work banked. Keep the next run properly easy."
     }
@@ -212,7 +212,24 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         when (val a = sg.act) {
             is MoveDay -> { updateSettings { it.copy(days = (it.days - a.from + a.to).distinct().sorted(), longDay = if (it.longDay == a.from) a.to else it.longDay) }; toast = "Plan updated" }
             is Remind -> { setReminder(true, a.min); toast = "Reminder set for ${fmtClock(a.min)}" }
+            is SetMax -> { updateSettings { it.copy(maxHr = a.hr) }; toast = "Zones rebuilt on ${a.hr} bpm" }
+            is RunWalk -> { updateSettings { it.copy(runWalk = a.on) }; toast = "Plan updated" }
+            TalkTest -> {
+                val e = engine()
+                val d = (0L..14L).map { e.today.plusDays(it) }.firstOrNull { d -> e.runsOn(d).isEmpty() && e.weekPlan(mondayOf(d)).ses[d.dayOfWeek.value]?.kind in setOf("easy", "runwalk") } ?: e.today.plusDays(1)
+                override(d, "talk"); toast = "Talk test set for ${DAY_NAMES[d.dayOfWeek.value - 1]}"
+            }
+            EnterTalk -> Unit      // needs a number: the home screen asks for it and calls setTalk
         }
+    }
+
+    /** Stores the talk-test ceiling; zones rebuild around it. 0 goes back to the formula. */
+    fun setTalk(hr: Int) { updateSettings { it.copy(talkHr = hr) }; toast = if (hr > 0) "Zone 2 now tops out at $hr bpm" else "Zones back on the formula" }
+
+    /** One tap after a run: how it felt, 1 very easy to 5 all out. */
+    fun setFeel(id: String, feel: Int) {
+        val r = data.runs.firstOrNull { it.id == id } ?: return
+        commit(data.copy(runs = data.runs.filter { it.id != id } + r.copy(feel = feel)))
     }
 
     /** "Not now": the same suggestion stays away for four weeks. */

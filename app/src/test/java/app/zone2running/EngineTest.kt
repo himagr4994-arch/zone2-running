@@ -176,19 +176,19 @@ class EngineTest {
     }
 
     @Test fun offersToMoveThePlanToTheDaysActuallyRun() {
-        val plan = s.copy(planStart = today.minusWeeks(5), remindOn = true, remindMin = 1080)
+        val plan = s.copy(planStart = today.minusWeeks(5), remindOn = true, remindMin = 1080, snoozed = mapOf("talk" to today))
         val sg = Engine(plan, mondayRunner(), today).suggestions()
         assertEquals(1, sg.size)
         assertEquals(MoveDay(2, 1), sg[0].act)                                      // Tuesday never run, Monday always
         assertEquals("Move Tuesday's run to Monday?", sg[0].title)
         // Said "not now" last week: it stays away.
-        assertTrue(Engine(plan.copy(snoozed = mapOf(sg[0].key to today.minusDays(7))), mondayRunner(), today).suggestions().isEmpty())
+        assertTrue(Engine(plan.copy(snoozed = plan.snoozed + (sg[0].key to today.minusDays(7))), mondayRunner(), today).suggestions().isEmpty())
         // A plan younger than three weeks is left alone.
         assertTrue(Engine(plan.copy(planStart = today.minusWeeks(1)), mondayRunner(), today).suggestions().isEmpty())
     }
 
     @Test fun offersAReminderAnHourBeforeTheUsualTime() {
-        val base = s.copy(planStart = today.minusWeeks(5), days = listOf(1, 4, 6))
+        val base = s.copy(planStart = today.minusWeeks(5), days = listOf(1, 4, 6), snoozed = mapOf("talk" to today))
         assertEquals(Remind(1080), Engine(base, mondayRunner(), today).suggestions().single().act)
         assertEquals("Move your reminder to 6 pm?", Engine(base.copy(remindOn = true, remindMin = 390), mondayRunner(), today).suggestions().single().title)
         assertTrue(Engine(base.copy(remindOn = true, remindMin = 1080), mondayRunner(), today).suggestions().isEmpty())
@@ -212,7 +212,8 @@ class EngineTest {
         val raceWeek = e.weekPlan(today.plusWeeks(1))
         assertEquals("Race week", raceWeek.phase)
         assertEquals("race", raceWeek.ses[7]!!.type); assertEquals("City Half", raceWeek.ses[7]!!.title)
-        assertTrue(raceWeek.ses.filterKeys { it < 7 }.values.all { it.kind == "easy" })
+        assertTrue(raceWeek.ses.filterKeys { it < 7 }.values.all { it.kind == "easy" || it.kind == "tune" })
+        assertEquals("tune", raceWeek.ses[4]!!.kind)                     // intensity stays, shortened; volume drops
         assertEquals(13, e.raceDaysLeft)
         val projected = e.racePrediction()!!                             // Riegel from the 10.26 km in 1:11:37
         assertTrue(projected in 9100..9350)
@@ -293,5 +294,153 @@ class EngineTest {
 
     @Test fun versionsCompareNumberByNumber() {
         assertTrue(Online.newer("0.10.0", "0.9.3")); assertTrue(Online.newer("1.0", "0.9.9")); assertTrue(!Online.newer("0.5.0", "0.5.0")); assertTrue(!Online.newer("0.4.9", "0.5.0"))
+    }
+
+    // ---- 0.7: the engine changes that came out of the research review ----
+
+    private fun easy(id: String, ago: Long, min: Int, hr: Int = 143, km: Double = min / 7.5) = Run(id, today.minusDays(ago), "easy", km, min * 60, hr)
+
+    @Test fun noRunOutgrowsTheLongestOfTheLastThirtyDaysByMuch() {
+        val runs = listOf(easy("a", 10, 40), easy("b", 6, 35), easy("c", 3, 30))
+        val e = Engine(s.copy(planStart = today), runs, today)
+        assertEquals(45, e.runCap(today.plusDays(6)))                    // 40 min + 10% = 44, but never less than 5 more
+        val long = e.weekPlan(today).ses[7]!!
+        assertEquals(45, long.min); assertTrue(long.detail.contains("longest run of the last 30 days"))
+        assertEquals(40, e.weekPlan(today).ses[2]!!.min)                 // an ordinary easy run is under the cap and untouched
+        assertNull(e.runCap(today.plusDays(20)))                         // too far ahead to know
+        assertNull(Engine(s, emptyList(), today).runCap(today))          // nothing to go on yet: setup decides
+        assertEquals(70, Engine(s.copy(planStart = today), listOf(easy("d", 5, 65)), today).weekPlan(today).ses[7]!!.min)
+    }
+
+    @Test fun aMonthOffRestartsShort() {
+        val e = Engine(s.copy(planStart = today), listOf(easy("a", 50, 70)), today)
+        assertEquals(-1, e.runCap(today.plusDays(1)))
+        val p = e.weekPlan(today)
+        assertEquals(40, p.ses[7]!!.min); assertEquals(25, p.ses[2]!!.min)
+        assertTrue(p.ses[7]!!.detail.contains("first month back"))
+    }
+
+    @Test fun aLongJumpIsFlaggedButAWeeklyJumpIsNot() {
+        val jump = Engine(s, listOf(easy("a", 9, 40, km = 6.0), easy("b", 1, 60, km = 9.0)), today).coach()
+        assertTrue(jump.any { it.tone == "warn" && it.text.contains("50% longer") })
+        val busy = Engine(s, listOf(easy("a", 8, 40, km = 6.0), easy("b", 2, 40, km = 6.0), easy("c", 1, 40, km = 6.0), easy("d", 0, 40, km = 6.0)), today).coach()
+        assertTrue(busy.none { it.text.contains("above last week") || it.text.contains("longer than anything") })
+    }
+
+    @Test fun oneOddRunDoesNotMoveTheEstimate() {
+        val steadyRuns = (1L..6L).map { Run("s$it", today.minusDays(it * 3), "easy", 6.0, 2880, 144) }        // 8:00/km at the reference
+        val base = Engine(s, steadyRuns, today)
+        assertEquals("8:00", fmtPace(base.current!!))
+        val withOutlier = Engine(s, steadyRuns + Run("x", today, "easy", 6.0, 3240, 144), today)                // a 9:00/km day
+        assertEquals("8:00", fmtPace(withOutlier.current!!))
+        assertEquals(2, withOutlier.confidence()!!.level)
+    }
+
+    @Test fun estimateUsesTheSteadyMiddleOfTheRun() {
+        // A slow first kilometre with a low heart rate, then five steady ones.
+        val sp = listOf(Split(540, 120)) + List(5) { Split(480, 144) }
+        val r = Run("a", today, "easy", 6.0, sp.sumOf { it.sec }, 140, splits = sp)
+        assertEquals(480.0 to 144, steady(r))
+        val e = Engine(s, listOf(r), today)
+        assertEquals("8:00", fmtPace(e.est(r)!!)); assertTrue(e.estOf(r)!!.clean)
+        assertEquals(paceOf(tenK) to 162, steady(tenK))                  // no splits: the whole run
+        assertTrue(!e.estOf(tenK)!!.clean)                               // a hard run only hints at Zone 2 pace
+    }
+
+    @Test fun aSmallChangeIsCalledWobbleNotProgress() {
+        fun block(from: Long, secs: List<Int>) = secs.mapIndexed { i, sec -> Run("r$from$i", today.minusDays(from - i * 3L), "easy", 6.0, sec, 144) }
+        val before = block(45, listOf(2880, 2910, 2850, 2940, 2820))                     // around 8:00, spread about ±10 s/km
+        val wobble = Engine(s, before + block(14, listOf(2870, 2850, 2900, 2860)), today).paceChange()!!
+        assertEquals("4 weeks ago", wobble.since); assertTrue(!wobble.real)
+        val faster = Engine(s, before + block(14, listOf(2760, 2750, 2770, 2740)), today).paceChange()!!
+        assertTrue(faster.real); assertTrue(faster.delta > 10)
+    }
+
+    @Test fun talkTestMovesTheTopOfZone2() {
+        val e = Engine(s.copy(talkHr = 156), emptyList(), today)
+        assertEquals(157, e.zb[2]); assertEquals(2, e.zoneOf(156)); assertEquals(3, e.zoneOf(157))
+        assertTrue(e.zb.zipWithNext().all { (a, b) -> b > a })
+        val low = Engine(s.copy(talkHr = 138), emptyList(), today)
+        assertEquals(139, low.zb[2]); assertTrue(low.zb[1] <= 129)
+        assertEquals(listOf(135, 148, 160, 172), Engine(s.copy(talkHr = 156, zoneMethod = "custom"), emptyList(), today).zb.drop(1))   // a watch's zones are left alone
+    }
+
+    @Test fun taperLengthFollowsTheRace() {
+        fun phases(km: Double) = Engine(s.copy(planStart = today.minusWeeks(8), raceDate = today.plusDays(27), raceKm = km), listOf(tenK), today)
+            .let { e -> (0L..3L).map { e.weekPlan(today.plusWeeks(it)).phase } }
+        assertEquals(listOf(false, false, false), phases(5.0).take(3).map { it == "Taper" }); assertEquals("Race week", phases(5.0)[3])
+        assertEquals(listOf(false, false, true), phases(21.1).take(3).map { it == "Taper" })
+        assertEquals(listOf(false, true, true), phases(42.2).take(3).map { it == "Taper" })
+        val e = Engine(s.copy(planStart = today, raceDate = today.plusDays(13), raceKm = 42.2), emptyList(), today)
+        assertEquals("tune", e.weekPlan(today).ses[4]!!.kind)            // the hard day stays, shortened
+        assertEquals(4, e.weekPlan(today).ses.size)                      // and so does the number of runs
+        assertEquals(3, e.taperWeeks)
+    }
+
+    @Test fun raceForecastIsARangeAndHonestAboutTheMarathon() {
+        val half = Engine(s.copy(raceDate = today.plusDays(40), raceKm = 21.1), listOf(tenK), today).raceCast()!!
+        assertTrue(half.lo < half.sec && half.sec < half.hi); assertTrue(half.sec in 9100..9350); assertEquals("", half.warn)
+        val mara = Engine(s.copy(raceDate = today.plusDays(40), raceKm = 42.2), listOf(tenK), today).raceCast()!!
+        val riegel = 4297 * Math.pow(42.2 / 10.26, 1.06)
+        assertTrue(mara.sec > riegel + 600)                              // plain Riegel is at least ten minutes too fast for most
+        assertTrue(mara.warn.contains("optimistic")); assertTrue(mara.hi > mara.sec * 1.06)
+        // Intervals never feed it, and a fast 5 km inside a longer run does.
+        assertNull(Engine(s.copy(raceKm = 10.0, raceDate = today.plusDays(40)), listOf(tenK.copy(type = "intervals")), today).raceCast())
+        val sp = List(3) { Split(480, 140) } + List(5) { Split(330, 170) } + List(2) { Split(480, 140) }
+        val prog = Run("p", today.minusDays(3), "easy", 10.0, sp.sumOf { it.sec }, 152, splits = sp)
+        val c = Engine(s.copy(raceKm = 5.0, raceDate = today.plusDays(40)), listOf(prog), today).raceCast()!!
+        assertEquals(1650, c.sec); assertTrue(c.basis.startsWith("your best 5 km"))
+    }
+
+    @Test fun hotEasyDaysGetSlowDownFirstThenRunWalk() {
+        fun hot(n: Int, cool: Int = 0) = (1..n).map { Run("h$it", today.minusDays(it * 2L), "easy", 5.0, 2400, if (it <= cool) 140 else 156) }
+        val one = Engine(s.copy(planStart = today), hot(3), today)
+        assertEquals(1, one.easyOver)
+        assertEquals("easy", one.weekPlan(today).ses[2]!!.kind); assertTrue(one.weekPlan(today).ses[2]!!.detail.contains("slow down first"))
+        val two = Engine(s.copy(planStart = today), hot(5), today)
+        assertEquals(2, two.easyOver); assertEquals("runwalk", two.weekPlan(today).ses[2]!!.kind)
+        assertTrue(two.weekPlan(today).ses[2]!!.detail.contains("not a step back"))
+        assertEquals(0, Engine(s, hot(5, cool = 3), today).easyOver)     // the latest runs are back under the ceiling
+        // The same runs on hot days prove nothing about pacing.
+        assertEquals(0, Engine(s, hot(5).map { it.copy(heatPct = 4.0) }, today).easyOver)
+        // Zone time beats the average: 38 of 40 minutes easy is fine even if the average sits on the line.
+        assertEquals(0, Engine(s, hot(5).map { it.copy(avgHr = 150, zoneSec = listOf(300, 1980, 120, 0, 0)) }, today).easyOver)
+    }
+
+    @Test fun beginnersStartWithRunWalkAndGraduate() {
+        val b = s.copy(runWalk = true, planStart = today, snoozed = mapOf("talk" to today))
+        assertEquals("runwalk", Engine(b, emptyList(), today).weekPlan(today).ses[2]!!.kind)
+        assertEquals("long", Engine(b, emptyList(), today).weekPlan(today).ses[7]!!.kind)
+        val ok = (1L..3L).map { easy("g$it", it * 2, 25, 140) }
+        assertEquals(RunWalk(false), Engine(b, ok, today).suggestions().single { it.key == "runwalk" }.act)
+    }
+
+    @Test fun screeningChangesThePlanNotJustTheWording() {
+        assertTrue(Engine(s.copy(caution = true), emptyList(), today).weekPlan(today).ses.values.none { it.type in setOf("intervals", "tempo") })
+        val meds = Engine(s.copy(hrMeds = true), emptyList(), today).weekPlan(today)
+        assertTrue(meds.ses[2]!!.detail.contains("full sentences")); assertTrue(meds.ses.values.none { it.detail.contains("bpm") })
+        // Every heart-rate target carries an effort cue.
+        val plain = Engine(s, emptyList(), today)
+        (0L..2L).flatMap { plain.weekPlan(today.plusWeeks(it)).ses.values }.filter { it.kind != "test" }.forEach { x ->
+            assertTrue(x.title, listOf("sentence", "words at a time").any { x.detail.contains(it) })
+        }
+    }
+
+    @Test fun effortRatingStandsInWhenThereIsNoHeartRate() {
+        val e = Engine(s, emptyList(), today)
+        assertTrue(e.isEasy(Run("a", today, "tempo", 5.0, 1800, feel = 2))); assertTrue(!e.isEasy(Run("b", today, "easy", 5.0, 1800, feel = 5)))
+        val tired = (1L..3L).map { easy("t$it", it * 2, 40, 140).copy(feel = 4) }
+        assertTrue(Engine(s, tired, today).coach().any { it.text.contains("felt hard") })
+    }
+
+    @Test fun offersTheRealMaxAndTheTalkTest() {
+        val runs = listOf(easy("a", 9, 40), easy("b", 6, 40), tenK.copy(id = "h1", date = today.minusDays(4), maxHr = 195), tenK.copy(id = "h2", date = today.minusDays(2), maxHr = 193))
+        val sg = Engine(s, runs, today).suggestions()
+        assertEquals(SetMax(193), sg.single { it.act is SetMax }.act)    // reached twice; a single spike is not believed
+        assertEquals(TalkTest, sg.single { it.key == "talk" }.act)
+        val done = s.copy(overrides = mapOf(today.minusDays(6) to "talk"))
+        assertEquals(EnterTalk, Engine(done, runs, today).suggestions().first().act)
+        assertTrue(Engine(done.copy(talkHr = 150), runs, today).suggestions().none { it.act == EnterTalk || it.act == TalkTest })
+        assertEquals(35 * 60, Engine(s, emptyList(), today).let { e -> e.steps(e.weekPlan(today).ses[2]!!.copy(kind = "talk")).sumOf { it.sec } } + 120)
     }
 }

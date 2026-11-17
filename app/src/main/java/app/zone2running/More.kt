@@ -72,7 +72,7 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
                     Column { Head("Zone 2 Running"); Small("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})") }
                 }
                 Body("A training app for one goal: getting faster at an easy heart rate. It turns your runs into a Zone 2 pace, builds a plan around it, and keeps your data on your phone.")
-                NoteBox(Note("plain", "Not medical advice. Zones and pace estimates are rough guides. Talk to a doctor before starting a new plan if you have a health condition, and stop if something feels wrong."))
+                NoteBox(Note("plain", "Not medical advice. Zones and pace estimates are rough guides. Talk to a doctor before starting a new plan if you have a health condition. $STOP_SIGNS"))
             }
             Panel {
                 MenuRow("Privacy policy", "What stays on your phone and the two times the app goes online") { go("privacy") }

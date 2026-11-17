@@ -66,6 +66,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
             }
         }
         if (steps.size > 8) Small("…and ${steps.size - 8} more blocks.")
+        if (steps.any { it.kind == "hard" || it.kind == "race" }) Small(STOP_SIGNS)
     }
     Panel {
         Label("Heart rate sensor")

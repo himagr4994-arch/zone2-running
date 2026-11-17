@@ -70,6 +70,16 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
             for (i in 0..3) Field("Z${i + 2} from", cz[i], Modifier.weight(1f)) { v -> cz = cz.toMutableList().also { it[i] = v } }
         }
         ZoneStrip(e)
+        if (s.zoneMethod != "custom") {
+            Head("Talk test", 20)
+            if (s.talkHr > 0) NoteBox(Note("good", "Zone 2 tops out at ${s.talkHr} bpm, from your talk test. The formula is only used for the other zones."))
+            else Small("Formula zones miss by ten beats or more for many people. The talk test finds your own ceiling: run 3-minute stages, each a little faster, and say a full sentence out loud in every one. The highest heart rate at which that was still comfortable is the top of your Zone 2.")
+            TalkEntry(e) { vm.setTalk(it) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Btn("Add a guided talk test to my plan", ghost = true, small = true) { vm.accept(Suggestion("talk", "", "", "", TalkTest)) }
+                if (s.talkHr > 0) Btn("Use the formula", ghost = true, small = true) { vm.setTalk(0) }
+            }
+        }
         Head("Session length")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Field("Easy run, minutes", easy, Modifier.weight(1f)) { easy = it }
@@ -103,7 +113,8 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         DayPicker(s.days) { d -> vm.updateSettings { it.copy(days = if (d in it.days) it.days - d else (it.days + d).sorted()) } }
         Small("Long run day")
         DayPicker(listOf(s.longDay)) { d -> vm.updateSettings { it.copy(longDay = d) } }
-        Toggle("One harder session a week", "Needs 4 or more running days.", s.quality) { v -> vm.updateSettings { it.copy(quality = v) } }
+        Toggle("One harder session a week", if (s.caution) "Off while the health check below says to see a doctor first." else "Needs 4 or more running days.", s.quality && !s.caution) { v -> if (!s.caution) vm.updateSettings { it.copy(quality = v) } }
+        Toggle("Easy runs as run-walk", "Jog 4 minutes, walk 1. A normal way to stay in Zone 2, and the best way to start.", s.runWalk) { v -> vm.updateSettings { it.copy(runWalk = v) } }
         Small("Week 1 of your plan started ${fmtDay(e.planStart)} ${e.planStart.year}.")
         Btn("Restart the plan from this week", ghost = true, small = true) { vm.updateSettings { it.copy(planStart = mondayOf(LocalDate.now())) }; vm.toast = "Plan restarted" }
     }
@@ -117,6 +128,12 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     }
 
     RacePanel(vm, e)
+
+    Panel {
+        Head("Health check")
+        SafetyQuestions(s.caution, s.hrMeds) { c, m -> vm.updateSettings { it.copy(caution = c, hrMeds = m) } }
+        Small(STOP_SIGNS, p.ink)
+    }
 
     Panel {
         Head("Live run")
@@ -213,7 +230,7 @@ private fun RacePanel(vm: AppVM, e: Engine) {
     var picking by remember { mutableStateOf(false) }
     Panel {
         Head("Race goal")
-        Body("Optional. Pick an event and the plan builds toward it, tapers over the last two weeks and puts the race on your calendar.", p.muted)
+        Body("Optional. Pick an event and the plan builds toward it, eases off before it (one week for 5 or 10 km, two for a half, three for a marathon) and puts the race on your calendar.", p.muted)
         Field("Event name", name, keyboard = KeyboardType.Text, placeholder = "City half marathon") { name = it }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("5K" to 5.0, "10K" to 10.0, "Half" to 21.1, "Marathon" to 42.2).forEach { (n, d) -> Pick(n, km == d, Modifier.weight(1f)) { km = d } }
@@ -229,7 +246,8 @@ private fun RacePanel(vm: AppVM, e: Engine) {
             }
             if (s.raceDate != null) Btn("Remove", ghost = true) { vm.setRace("", null, 0.0) }
         }
-        e.raceDaysLeft?.let { Small("${it} day${if (it == 1) "" else "s"} to go." + (e.racePrediction()?.let { t -> " Projected finish about ${fmtDur(t)}, from your hardest recent run." } ?: ""), p.ink) }
+        e.raceDaysLeft?.let { Small("${it} day${if (it == 1) "" else "s"} to go." + (e.raceCast()?.let { c -> " Likely finish ${fmtDur(c.lo)}–${fmtDur(c.hi)}, going by ${c.basis}." } ?: ""), p.ink) }
+        e.raceCast()?.warn?.takeIf { it.isNotEmpty() }?.let { Small(it) }
     }
     if (picking) {
         val st = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = (date ?: LocalDate.now().plusWeeks(12)).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
@@ -259,6 +277,15 @@ fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) 
         NoteBox(Note("plain", "Preview: “Today: Easy run · 40 min. Keep HR in Zone 2.”"))
     }
     if (denied) Small("Notifications are blocked for this app. You can allow them in Android settings.")
+}
+
+/** Two screening questions. A yes changes the plan; it never just shows a warning and carries on. */
+@Composable
+private fun SafetyQuestions(caution: Boolean, meds: Boolean, set: (Boolean, Boolean) -> Unit) {
+    Toggle("A heart, metabolic or kidney condition, or chest pain, dizziness or fainting when you exert yourself", "", caution) { set(it, meds) }
+    if (caution) NoteBox(Note("warn", "See a doctor before training hard. Until you switch this off, the plan has easy runs only: no intervals or tempo."))
+    Toggle("Medication that changes your heart rate, such as beta-blockers", "", meds) { set(caution, it) }
+    if (meds) NoteBox(Note("plain", "Heart-rate zones won't fit you, so sessions are described by effort: easy means full sentences. Rate each run afterwards and the app goes by that."))
 }
 
 private val LEVELS = listOf(Triple("Just starting", "Under 10 km a week|Under 6 miles a week", Triple(25, 40, false)), Triple("Running regularly", "10–25 km a week|6–15 miles a week", Triple(35, 60, true)), Triple("Experienced", "More than 25 km a week|More than 15 miles a week", Triple(45, 80, true)))
@@ -320,6 +347,9 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
     var easy by remember { mutableIntStateOf(s0.easyMin) }
     var long by remember { mutableIntStateOf(s0.longMin) }
     var quality by remember { mutableStateOf(s0.quality) }
+    var runWalk by remember { mutableStateOf(s0.runWalk) }
+    var caution by remember { mutableStateOf(s0.caution) }
+    var meds by remember { mutableStateOf(s0.hrMeds) }
     var goalWeeks by remember { mutableIntStateOf(s0.goalWeeks) }
     var remind by remember { mutableStateOf(s0.remindOn) }
     var remindMin by remember { mutableIntStateOf(s0.remindMin) }
@@ -333,7 +363,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
             zoneMethod = if (s0.zoneMethod == "custom") "custom" else "hrr",
             basePace = if (base) cur else if (logged == null) 0 else s0.basePace, baseHr = if (base) hr else if (logged == null) 0 else s0.baseHr,
             baseDate = if (base) (s0.baseDate ?: today) else s0.baseDate,
-            days = days.sorted(), longDay = if (longDay in days) longDay else days.maxOrNull() ?: 7, easyMin = easy, longMin = long, quality = quality,
+            days = days.sorted(), longDay = if (longDay in days) longDay else days.maxOrNull() ?: 7, easyMin = easy, longMin = long, quality = quality, runWalk = runWalk, caution = caution, hrMeds = meds,
             planStart = s0.planStart ?: mondayOf(today), onboarded = true, disclaimerOk = true, goalWeeks = goalWeeks, remindOn = remind, remindMin = remindMin,
         )
     }
@@ -409,7 +439,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                     Small("For scale: the average marathon finisher races at about ${fmtPace(384.0)} ${U.per}, and their easy Zone 2 pace is roughly ${fmtPace(420.0)} to ${fmtPace(465.0)}.")
                 }
                 "level" -> LEVELS.forEachIndexed { i, (name, sub, v) ->
-                    Choice(name, sub.split("|")[if (U.miles) 1 else 0], level == i) { level = i; easy = v.first; long = v.second; quality = v.third; next() }
+                    Choice(name, sub.split("|")[if (U.miles) 1 else 0], level == i) { level = i; easy = v.first; long = v.second; quality = v.third; runWalk = i == 0; next() }
                 }
                 "days" -> {
                     DayPicker(days) { d -> days = if (d in days) days - d else days + d }
@@ -435,8 +465,10 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
                 "remind" -> ReminderPicker(remind, remindMin) { on, m -> remind = on; remindMin = m }
                 "safe" -> {
                     Body("I'm a training guide, not a doctor. Heart-rate zones and pace estimates here are rough, and they come from formulas, not from testing you.")
-                    Body("Talk to a doctor before starting if you have a heart condition, chest pain, dizziness or fainting, are pregnant, or are coming back from illness or injury.")
-                    Body("On any run: if something feels wrong, stop.")
+                    Body("Two questions, because the plan includes hard running. Switch on any that apply:")
+                    SafetyQuestions(caution, meds) { c, m -> caution = c; meds = m }
+                    Small("Also talk to a doctor first if you are pregnant or coming back from illness or injury.")
+                    Body(STOP_SIGNS)
                 }
                 else -> {
                     val tg = preview.s.targetPace.toDouble(); val gap = (now ?: tg) - tg
@@ -490,7 +522,7 @@ fun Onboarding(vm: AppVM, canClose: Boolean, close: () -> Unit) {
 }
 
 @Composable
-fun RewardScreen(c: Celebration, share: () -> Unit, done: () -> Unit) {
+fun RewardScreen(c: Celebration, feel: Int, rate: (Int) -> Unit, share: () -> Unit, done: () -> Unit) {
     val p = LocalPal.current
     val pop = enter(650, 100)
     val strong = haptic()
@@ -507,6 +539,7 @@ fun RewardScreen(c: Celebration, share: () -> Unit, done: () -> Unit) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) { Text(v, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, color = p.ink); Small(l) }
     }
     if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) ZoneBar(r.zoneSec)
+    EffortRow(feel, rate)
     c.estLine?.let { NoteBox(Note("plain", it)) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Flame(if (c.streakOn) p.hard else p.muted); Small(c.streakLine, p.ink) }
     if (c.newBadges.isNotEmpty()) c.newBadges.chunked(4).forEach { row ->

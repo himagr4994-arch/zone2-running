@@ -29,6 +29,7 @@ object Json {
             .put("weatherOn", s.weatherOn).put("city", s.city).put("lat", s.lat).put("lon", s.lon)
             .put("voiceOn", s.voiceOn).put("sensorAddr", s.sensorAddr).put("sensorName", s.sensorName)
             .put("updateCheck", s.updateCheck).put("disclaimerOk", s.disclaimerOk).put("seenPace", s.seenPace)
+            .put("talkHr", s.talkHr).put("runWalk", s.runWalk).put("caution", s.caution).put("hrMeds", s.hrMeds)
         val ra = JSONArray()
         for (r in d.runs) ra.put(
             JSONObject().put("id", r.id).put("date", r.date.toString()).put("type", r.type).put("distKm", r.distKm)
@@ -64,7 +65,7 @@ object Json {
             overrides = so.optJSONObject("overrides")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(k)?.let { it to o.optString(k) } }.toMap() } ?: emptyMap(),
             weatherOn = so.optBoolean("weatherOn", false), city = so.optString("city"), lat = so.optDouble("lat", 0.0), lon = so.optDouble("lon", 0.0),
             voiceOn = so.optBoolean("voiceOn", true), sensorAddr = so.optString("sensorAddr"), sensorName = so.optString("sensorName"),
-            seenPace = so.optInt("seenPace", 0), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
+            seenPace = so.optInt("seenPace", 0), talkHr = so.optInt("talkHr", 0), runWalk = so.optBoolean("runWalk", false), caution = so.optBoolean("caution", false), hrMeds = so.optBoolean("hrMeds", false), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
             snoozed = so.optJSONObject("snoozed")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(o.optString(k))?.let { k to it } }.toMap() } ?: emptyMap(),
         )
         val ra = o.optJSONArray("runs") ?: JSONArray()

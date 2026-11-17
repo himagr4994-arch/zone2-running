@@ -72,7 +72,8 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
     val nextLesson = LESSONS.firstOrNull { it.id !in vm.settings.lessonsDone }
     var details by rememberSaveable { mutableStateOf(false) }
     val c = e.current; val seen = vm.settings.seenPace
-    val improved = c != null && seen > 0 && c < seen - 3
+    // Only a change bigger than the usual wobble between runs gets the celebration.
+    val improved = c != null && seen > 0 && c < seen - 3 && e.paceChange()?.let { it.real && it.delta > 0 } == true
 
     Row(Modifier.rise(0), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Dil(if (improved) "proud" else lead.mood, Modifier.size(84.dp))
@@ -100,6 +101,8 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
         AnimatedVisibility(details || !hasAction) {
             Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(lead.body, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
+                lead.run?.let { r -> EffortRow(e.runs.firstOrNull { it.id == r.id }?.feel ?: r.feel) { vm.setFeel(r.id, it) } }
+                if (lead.session?.type in setOf("intervals", "tempo", "race")) Small(STOP_SIGNS)
                 lead.session?.takeIf { it.type == "easy" || it.type == "long" }?.let { e.easyRange() }?.let {
                     val slow = 1 + lead.heatPct / 100
                     Small("Cap ${e.zb[2] - 1} bpm. Expect about ${fmtPace(it.first * slow)}–${fmtPace(it.second * slow)} ${U.per}.")
@@ -116,8 +119,9 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
             Label("Dil noticed")
             Head(sg.title, 20)
             Small(sg.body)
+            if (sg.act == EnterTalk) TalkEntry(e) { vm.setTalk(it) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Btn(sg.yes, small = true) { if (sg.act is Remind && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else vm.accept(sg) }
+                if (sg.act != EnterTalk) Btn(sg.yes, small = true) { if (sg.act is Remind && android.os.Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(ctx)) ask.launch(android.Manifest.permission.POST_NOTIFICATIONS) else vm.accept(sg) }
                 Btn("Not now", ghost = true, small = true) { vm.snooze(sg) }
             }
         }
@@ -136,8 +140,11 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
             Link("plus", "Version $version is out", "Installing it keeps your data") { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } }
         }
         e.raceDaysLeft?.let { left ->
-            Fold("flag", "${e.s.raceName.ifBlank { "Your race" }} · ${U.dist(e.s.raceKm, 1)}", when (left) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "In $left days" } + (e.racePrediction()?.let { " · about ${fmtDur(it)}" } ?: "")) {
-                Small(if (e.racePrediction() != null) "Projected from your hardest recent run. The plan tapers over the last two weeks." else "Log one hard run and a projected time appears. The plan tapers over the last two weeks.")
+            val cast = e.raceCast()
+            val ease = "The plan eases off over the last ${listOf("week", "two weeks", "three weeks")[e.taperWeeks - 1]}."
+            Fold("flag", "${e.s.raceName.ifBlank { "Your race" }} · ${U.dist(e.s.raceKm, 1)}", when (left) { 0 -> "Today"; 1 -> "Tomorrow"; else -> "In $left days" } + (cast?.let { " · ${fmtDur(it.lo)}–${fmtDur(it.hi)}" } ?: "")) {
+                Small(if (cast != null) "Likely between ${fmtDur(cast.lo)} and ${fmtDur(cast.hi)}, going by ${cast.basis}. $ease" else "Run one hard effort of ${U.dist(3.0, 0)} or more and a forecast appears. $ease")
+                cast?.warn?.takeIf { it.isNotEmpty() }?.let { NoteBox(Note("warn", it)) }
             }
         }
         e.runs.lastOrNull()?.let { r ->
@@ -277,8 +284,9 @@ fun PaceHero(vm: AppVM, e: Engine, improved: Boolean) {
                 improved -> "${U.s((seen - c).roundToInt())} seconds faster since you last looked." to true
                 gap <= 0 -> "You're holding your target. Set a faster one in Settings." to true
                 ch == null -> "A few more runs and the trend appears." to false
-                ch.delta >= 3 -> "${U.s(ch.delta.roundToInt())} seconds faster than ${ch.since}." to false
-                ch.delta <= -3 -> "${U.s((-ch.delta).roundToInt())} seconds slower than ${ch.since}." to false
+                ch.real && ch.delta >= 3 -> "${U.s(ch.delta.roundToInt())} seconds faster than ${ch.since}." to false
+                ch.real && ch.delta <= -3 -> "${U.s((-ch.delta).roundToInt())} seconds slower than ${ch.since}." to false
+                abs(ch.delta) >= 3 -> "About level with ${ch.since}. A few seconds either way is normal wobble between runs." to false
                 else -> "Level with ${ch.since}." to false
             }
             Text(line, color = if (loud) p.heroMark else p.heroInk, fontSize = 16.sp, lineHeight = 22.sp, fontFamily = BodyFont, fontWeight = FontWeight.Medium)
@@ -288,7 +296,7 @@ fun PaceHero(vm: AppVM, e: Engine, improved: Boolean) {
         e.confidence()?.let { conf ->
             Row(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { for (i in 0..2) Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= conf.level) p.heroMark else p.heroTrack)) }
-                Text(conf.label + if (pts.size > 1) " · drag the chart to look back" else "", color = p.heroMuted, fontSize = 13.sp, fontFamily = BodyFont)
+                Text(conf.label + (e.band?.let { " · likely ${fmtPace(it.first)}–${fmtPace(it.second)}" } ?: if (pts.size > 1) " · drag the chart to look back" else ""), color = p.heroMuted, fontSize = 13.sp, fontFamily = BodyFont)
             }
         }
     }

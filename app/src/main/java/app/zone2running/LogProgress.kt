@@ -80,7 +80,7 @@ fun LogScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (FormSeed)
 
 /** One run, shown rather than edited: the pace, where the heart rate sat, the splits, and what it says about Zone 2. */
 @Composable
-fun RunPage(e: Engine, r: Run, edit: () -> Unit, close: () -> Unit) {
+fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, close: () -> Unit) {
     val p = LocalPal.current
     val z = if (r.avgHr > 0) e.zoneOf(r.avgHr) else 0
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -110,13 +110,15 @@ fun RunPage(e: Engine, r: Run, edit: () -> Unit, close: () -> Unit) {
         Small(r.zoneSec.mapIndexedNotNull { i, sec -> if (sec >= 60) "Z${i + 1} ${sec / 60} min" else null }.joinToString(" · "))
     }
     if (r.splits.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label("Kilometre splits"); SplitBars(r.splits) }
+    EffortRow(r.feel, rate)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Label("What it says")
         val est = e.est(r)
         NoteBox(Note(if (z in 1..2) "good" else "plain", when {
             est == null && r.type == "intervals" -> "Intervals are left out of the Zone 2 estimate. Their average heart rate says little."
             est == null -> "Add an average heart rate and this run feeds your Zone 2 estimate."
-            z in 1..2 -> "Run in Zone 2, so this is a direct reading: ${fmtPace(est)} ${U.per} at ${e.refHr} bpm."
+            e.estOf(r)?.clean == true -> "A steady run close to ${e.refHr} bpm, so this is a direct reading: ${fmtPace(est)} ${U.per}." + if (steady(r)?.first != paceOf(r)) " It is taken from the steady middle of the run, after the warm-up." else ""
+            z in 1..2 -> "Scaled to ${e.refHr} bpm, it points to about ${fmtPace(est)} ${U.per}. Runs of 20 minutes or more within ten beats of ${e.refHr} give the firmest reading."
             else -> "Averaged Zone $z. Scaled down to ${e.refHr} bpm, it points to about ${fmtPace(est)} ${U.per}. A rougher reading than an easy run gives."
         }))
         if (r.heatPct >= 1.5) Small("Weather that hour slowed running by roughly ${f1(r.heatPct)}%. The estimate allows for it.", p.ink)
@@ -184,7 +186,7 @@ fun RunForm(vm: AppVM, e: Engine, seed: FormSeed, close: () -> Unit) {
         }
         Small("How it felt: 1 very easy, 3 steady, 5 all out")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("Very easy", "Easy", "Steady", "Hard", "All out").forEachIndexed { i, n -> Pick("${i + 1}", feel == i + 1, Modifier.weight(1f)) { feel = if (feel == i + 1) 0 else i + 1 } }
+            FEELS.forEachIndexed { i, n -> Pick("${i + 1}", feel == i + 1, Modifier.weight(1f)) { feel = if (feel == i + 1) 0 else i + 1 } }
         }
         Field("Notes (heat, route, sleep)", notes, keyboard = KeyboardType.Text, singleLine = false) { notes = it }
         val d = draft()

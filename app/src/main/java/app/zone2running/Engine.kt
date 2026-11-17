@@ -88,6 +88,10 @@ data class Settings(
     val voiceOn: Boolean = true, val sensorAddr: String = "", val sensorName: String = "",
     val updateCheck: Boolean = false, val disclaimerOk: Boolean = false,
     val seenPace: Int = 0,                     // the Zone 2 pace last shown on the home screen, to notice when it improves
+    val talkHr: Int = 0,                       // top of Zone 2 found with a talk test; 0 = not done, zones come from the formula
+    val runWalk: Boolean = false,              // easy runs are planned as run-walk (the default for someone just starting)
+    val caution: Boolean = false,              // answered yes to a health screening question: no hard sessions are planned
+    val hrMeds: Boolean = false,               // on medication that changes heart rate: guidance goes by effort, not bpm
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String, val kind: String = type)
@@ -107,8 +111,19 @@ data class Lead(val kind: String, val mood: String, val eyebrow: String, val tit
 sealed interface Act
 data class MoveDay(val from: Int, val to: Int) : Act
 data class Remind(val min: Int) : Act
+data class SetMax(val hr: Int) : Act
+object TalkTest : Act                       // put a talk test on the next easy day
+object EnterTalk : Act                      // the talk test is done: ask for the number
+data class RunWalk(val on: Boolean) : Act
 data class Suggestion(val key: String, val title: String, val body: String, val yes: String, val act: Act)
-data class PaceChange(val delta: Double, val since: String)          // positive delta = faster
+/** [real] is false when the change is smaller than the usual spread between runs. Positive delta = faster. */
+data class PaceChange(val delta: Double, val since: String, val real: Boolean = true)
+/** One run's reading of Zone 2 pace. [clean] = a steady run of 20+ minutes close to the reference heart rate. */
+data class Est(val run: Run, val pace: Double, val clean: Boolean)
+/** The Zone 2 pace as of some day: the median of recent readings and the middle half of them. */
+data class Reading(val pace: Double, val lo: Double, val hi: Double, val n: Int, val clean: Boolean)
+/** A race forecast is a range, never one number. */
+data class RaceCast(val sec: Int, val lo: Int, val hi: Int, val basis: String, val warn: String = "")
 data class Confidence(val level: Int, val label: String, val why: String)   // 0 rough, 1 fair, 2 solid
 data class Note(val tone: String, val text: String)   // tone: warn, good, plain
 data class Trend(val a: Double, val b: Double, val t0: LocalDate)
@@ -152,7 +167,28 @@ fun mondayOf(d: LocalDate): LocalDate = d.minusDays((d.dayOfWeek.value - 1).toLo
 fun paceOf(r: Run) = r.durSec / r.distKm
 
 /** Session kinds a runner can swap in, with the name shown in the picker. */
-val SWAP_KINDS = linkedMapOf("easy" to "Easy run", "runwalk" to "Run-walk", "long" to "Long easy run", "tempo" to "Tempo", "4x4" to "4 × 4 min intervals", "6x3" to "6 × 3 min intervals", "test" to "Zone 2 test")
+val SWAP_KINDS = linkedMapOf("easy" to "Easy run", "runwalk" to "Run-walk", "long" to "Long easy run", "tempo" to "Tempo", "4x4" to "4 × 4 min intervals", "6x3" to "6 × 3 min intervals", "test" to "Zone 2 test", "talk" to "Talk test")
+
+const val STOP_SIGNS = "Stop and get medical help for chest pain or pressure, fainting or feeling faint, unusual breathlessness, or a racing or irregular heartbeat."
+val FEELS = listOf("Very easy", "Easy", "Steady", "Hard", "All out")
+
+fun median(v: List<Double>): Double = quantile(v, .5)
+/** Quantile of an already sorted list, with straight-line interpolation between neighbours. */
+fun quantile(v: List<Double>, q: Double): Double {
+    val x = q * (v.size - 1); val i = floor(x).toInt(); val j = min(v.size - 1, i + 1)
+    return v[i] + (v[j] - v[i]) * (x - i)
+}
+
+/**
+ * Pace and heart rate of the steady part of a run. With kilometre splits that is roughly minutes 8 to 42,
+ * so the warm-up and late drift weigh the same on every run; without splits it is the whole run.
+ */
+fun steady(r: Run): Pair<Double, Int>? {
+    if (r.avgHr <= 0 || r.distKm <= 0 || r.durSec <= 0) return null
+    var t = 0; var sec = 0; var beats = 0L; var n = 0
+    for (sp in r.splits) { val start = t; t += sp.sec; if (start >= 480 && t <= 2520 && sp.hr > 0 && sp.sec > 0) { sec += sp.sec; beats += sp.hr.toLong() * sp.sec; n++ } }
+    return if (n >= 2) sec.toDouble() / n to (beats / sec).toInt() else paceOf(r) to r.avgHr
+}
 
 /**
  * How much heat slows a run, in percent, from the sum of temperature and dew point in °F.
@@ -191,29 +227,84 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         val c = s.customZ; listOf(c[0] - (c[1] - c[0])) + c
     } else listOf(.5, .6, .7, .8, .9).map {
         (if (s.zoneMethod == "hrr") s.restHr + it * (s.maxHr - s.restHr) else it * s.maxHr).roundToInt()
+    }.let { f ->
+        // A talk test beats the formula: Zone 3 starts one beat above the highest heart rate at which talking was still easy.
+        if (s.talkHr <= 0) f else {
+            val z3 = s.talkHr + 1; val z2 = min(f[1], z3 - 10); val z4 = max(f[3], z3 + 8)
+            listOf(min(f[0], z2 - 8), z2, z3, z4, max(f[4], z4 + 6))
+        }
     }
     val refHr: Int = if (s.refHr > 0) s.refHr else ((zb[1] + zb[2]) / 2.0).roundToInt()
 
     fun zoneOf(hr: Int): Int { var z = 1; for (i in 1..4) if (hr >= zb[i]) z++; return z }
 
-    /** Pace this run implies at the Zone 2 reference heart rate, scaled along heart-rate reserve. */
-    fun est(r: Run): Double? {
-        if (r.avgHr <= 0 || r.distKm <= 0 || r.durSec <= 0 || r.type == "intervals") return null
+    /**
+     * Pace this run implies at the Zone 2 reference heart rate, scaled along heart-rate reserve.
+     * Intervals are left out: their average says little.
+     */
+    fun estOf(r: Run): Est? {
+        if (r.type == "intervals") return null
+        val (pace, hr) = steady(r) ?: return null
         val d = refHr - s.restHr
-        if (r.avgHr - s.restHr < 25 || d < 15) return null
-        return paceOf(r) * (r.avgHr - s.restHr) / d / (1 + r.heatPct / 100)      // a hot day shouldn't read as lost fitness
+        if (hr - s.restHr < 25 || d < 15) return null
+        val p = pace * (hr - s.restHr) / d / (1 + r.heatPct / 100)             // a hot day shouldn't read as lost fitness
+        val clean = abs(hr - refHr) <= 10 && (r.id == "_base" || r.durSec >= 1200) && r.type !in setOf("tempo", "hard", "race")
+        return Est(r, p, clean)
     }
+    fun est(r: Run): Double? = estOf(r)?.pace
 
     private val basePoint: Run? = if (s.basePace > 0 && s.baseHr > 0 && s.baseDate != null)
         Run("_base", s.baseDate, "baseline", 1.0, s.basePace, s.baseHr) else null
 
-    val eligible: List<Pair<Run, Double>> = (listOfNotNull(basePoint) + runs)
-        .mapNotNull { r -> est(r)?.let { r to it } }.sortedBy { it.first.date }
+    val ests: List<Est> = (listOfNotNull(basePoint) + runs).mapNotNull { estOf(it) }.sortedBy { it.run.date }
+    val eligible: List<Pair<Run, Double>> = ests.map { it.run to it.pace }
 
-    val current: Double? = eligible.takeLast(3).takeIf { it.isNotEmpty() }?.map { it.second }?.average()
+    /**
+     * Zone 2 pace as of a day. Heart rate at easy effort wanders a few beats from day to day, which is worth
+     * 15 to 20 seconds a kilometre, so one run proves little. This takes the median of up to eight clean
+     * readings from the last six weeks; until there are three of those it uses the last five of any kind.
+     */
+    fun reading(asOf: LocalDate = today): Reading? {
+        val all = ests.filter { !it.run.date.isAfter(asOf) }
+        if (all.isEmpty()) return null
+        val clean = all.filter { it.clean && ChronoUnit.DAYS.between(it.run.date, asOf) <= 42 }.takeLast(8)
+        val v = (if (clean.size >= 3) clean else all.takeLast(5)).map { it.pace }.sorted()
+        return Reading(median(v), quantile(v, .25), quantile(v, .75), v.size, clean.size >= 3)
+    }
+    private val now: Reading? = reading()
+    val current: Double? = now?.pace
+    /** The middle half of recent readings, once there are enough to say. */
+    val band: Pair<Double, Double>? = now?.takeIf { it.n >= 4 && it.hi - it.lo >= 2 }?.let { it.lo to it.hi }
     val baseline: Double? = eligible.firstOrNull()?.second
 
-    fun isEasy(r: Run) = if (r.avgHr > 0) zoneOf(r.avgHr) <= 2 else r.type in setOf("easy", "long", "test")
+    /** The weekday that carries the harder session, when the plan has one. */
+    private val qualityDay: Int? = s.days.distinct().sorted().let { days ->
+        if (!(s.quality && !s.caution && days.size >= 4)) null else {
+            val longDay = if (s.longDay in days) s.longDay else days.last()
+            days.filter { it != longDay }.sortedWith(compareByDescending<Int> { d -> abs(d - longDay).let { min(it, 7 - it) } }.thenBy { it }).first()
+        }
+    }
+    /** Was this run meant to be easy? Imported runs are labelled by heart rate, so for those the weekday decides. */
+    private fun meantEasy(r: Run) = r.type in setOf("easy", "long") || (r.source == "health" && r.type in setOf("tempo", "hard") && r.date.dayOfWeek.value != qualityDay)
+    private fun overCeiling(r: Run) = if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) r.zoneSec.drop(2).sum() * 10 >= r.zoneSec.sum() * 4 else r.avgHr >= zb[2]
+    private val easyRecent: List<Run> = runs.filter { meantEasy(it) && it.avgHr > 0 && it.heatPct < 1.5 && it.durSec >= 900 && ChronoUnit.DAYS.between(it.date, today) in 0..27 }.takeLast(5)
+
+    /**
+     * Are easy days running too hot? Only cool-weather runs count, and a run counts as over when 40% of it
+     * was above the ceiling. 1 = two of the last three: slow down first. 2 = four of the last five: run-walk.
+     */
+    val easyOver: Int = when {
+        easyRecent.size >= 5 && easyRecent.count { overCeiling(it) } >= 4 -> 2
+        easyRecent.size >= 3 && easyRecent.takeLast(3).count { overCeiling(it) } >= 2 -> 1
+        else -> 0
+    }
+
+    /** Heart rate decides when there is one (and it can be trusted); then the runner's own rating; then the label. */
+    fun isEasy(r: Run) = when {
+        r.avgHr > 0 && !s.hrMeds -> zoneOf(r.avgHr) <= 2
+        r.feel > 0 -> r.feel <= 3
+        else -> r.type in setOf("easy", "long", "test")
+    }
 
     /** Totals for runs dated from..to (to exclusive). */
     fun span(from: LocalDate, to: LocalDate): Span {
@@ -247,10 +338,6 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     private val breakSet = s.breakWeeks.toSet()
     private val plannedCount = s.days.distinct().size
     private val weekNeed = max(1, min(max(1, plannedCount), max(2, ceil(plannedCount * .75).toInt())))
-
-    /** True when at least half of the recent easy runs averaged Zone 3 or above. */
-    val driftingHard: Boolean = runs.filter { it.type in setOf("easy", "long") && it.avgHr > 0 && ChronoUnit.DAYS.between(it.date, today) in 0..13 }
-        .let { it.size >= 2 && it.count { r -> zoneOf(r.avgHr) >= 3 } * 2 >= it.size }
 
     /**
      * Every week from the first run to now. A missed week is covered by a rest pass when one is left
@@ -299,61 +386,92 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         )
     }
 
-    /** Builds one session of the given kind, sized for the week it sits in. */
+    /**
+     * Builds one session of the given kind, sized for the week it sits in. Every heart-rate target comes with
+     * an effort cue, because a sensor can read wrong; on heart-rate medication the cue is the whole instruction.
+     */
     private fun build(kind: String, easy: Int, long: Int): Session {
         val z2 = "${zb[1]}–${zb[2] - 1} bpm"; val z3 = "${zb[2]}–${zb[3] - 1} bpm"; val z4 = "${zb[3]}–${zb[4] - 1} bpm"
+        val feel = s.hrMeds
+        val easyCue = if (feel) "Go by feel, not heart rate: slow enough to speak in full sentences the whole way." else "Keep HR $z2. You should be able to speak full sentences."
+        val hardCue = if (feel) "hard but repeatable, a few words at a time" else "in Zone 4 ($z4): hard but repeatable, a few words at a time"
         return when (kind) {
-            "long" -> Session("long", "Long easy run", long, "Stay under ${zb[2]} bpm the whole way. Walk for a minute whenever HR climbs past it.")
-            "test" -> Session("test", "Zone 2 test", 40, "10 min warm-up, then 30 min holding $refHr bpm on a flat route. It is logged as a Zone 2 test.")
-            "strides" -> Session("easy", "Easy run + strides", easy, "Keep HR $z2, then finish with 6 × 20 s relaxed fast strides.", "strides")
-            "4x4" -> Session("intervals", "4 × 4 min hard", 50, "10 min easy, 4 × 4 min in Zone 4 ($z4) with 3 min jog between, 10 min easy.", "4x4")
-            "tempo" -> Session("tempo", "Tempo 20 min", 40, "10 min easy, 20 min steady in Zone 3 ($z3), 10 min easy.")
-            "6x3" -> Session("intervals", "6 × 3 min hard", 50, "10 min easy, 6 × 3 min in Zone 4 ($z4) with 2 min jog between, 10 min easy.", "6x3")
-            "runwalk" -> Session("easy", "Easy run-walk", easy, "Jog 4 min, walk 1 min, and keep HR $z2.", "runwalk")
+            "long" -> Session("long", "Long easy run", long, if (feel) "Full-sentence effort the whole way. Walk for a minute whenever talking gets hard." else "Stay under ${zb[2]} bpm the whole way, at an effort where you can talk in full sentences. Walk for a minute whenever HR climbs past it.")
+            "test" -> Session("test", "Zone 2 test", 40, "10 min warm-up, then 30 min holding $refHr bpm on a flat route. It should feel easy enough to chat. It is logged as a Zone 2 test.")
+            "strides" -> Session("easy", "Easy run + strides", easy, "$easyCue Then finish with 6 × 20 s relaxed fast strides.", "strides")
+            "4x4" -> Session("intervals", "4 × 4 min hard", 50, "10 min easy, 4 × 4 min $hardCue. 3 min jog between, 10 min easy.", "4x4")
+            "tempo" -> Session("tempo", "Tempo 20 min", 40, "10 min easy, 20 min steady ${if (feel) "" else "in Zone 3 ($z3), "}comfortably hard: short sentences only. 10 min easy.")
+            "6x3" -> Session("intervals", "6 × 3 min hard", 50, "10 min easy, 6 × 3 min $hardCue. 2 min jog between, 10 min easy.", "6x3")
+            "tune" -> Session("intervals", "Race tune-up", 35, "10 min easy, 3 × 3 min $hardCue. 2 min jog between, 10 min easy. Short on purpose: it keeps the legs sharp while the week stays light.", "tune")
+            "talk" -> Session("tempo", "Talk test", 35, "10 min easy, then six 3-minute stages, each a little faster than the last. Near the end of every stage say a full sentence out loud, about 30 words. Note your heart rate in the last stage where talking was still comfortable: that is the top of your Zone 2.", "talk")
+            "runwalk" -> Session("easy", "Easy run-walk", easy, "Jog 4 min, walk 1 min${if (feel) ", at an effort where you can chat" else ", and keep HR $z2"}. Run-walk is a normal way to train in Zone 2, not a step back.", "runwalk")
             "race" -> Session("race", s.raceName.ifBlank { "Race day" }, ((racePrediction() ?: (s.raceKm * 390).roundToInt()) / 60.0).roundToInt(),
                 "Start slower than feels right for the first third, settle, and save the push for the end. Good luck.")
-            else -> Session("easy", "Easy run", easy, "Keep HR $z2. You should be able to speak full sentences.")
+            else -> Session("easy", "Easy run", easy, easyCue)
         }
+    }
+
+    /** How many weeks before a race the plan eases off: one for 5 to 10 km, two for a half, three for a marathon. */
+    val taperWeeks: Int = when { s.raceKm <= 12 -> 1; s.raceKm <= 30 -> 2; else -> 3 }
+
+    /**
+     * The longest a single run should be on a day, in minutes: about 10% past the longest run of the 30 days
+     * before it (and never less than 5 minutes more, or under 30). A run that jumps further than that is the
+     * clearest injury signal in the data; week-to-week totals are not. Null when the cap doesn't apply:
+     * no history yet, or a day too far ahead to know. A negative value means a comeback after a month or more off.
+     */
+    fun runCap(d: LocalDate): Int? {
+        if (d.isAfter(today.plusDays(7)) || runs.none { it.date.isBefore(d) }) return null
+        val longest = runs.filter { it.date.isBefore(d) && ChronoUnit.DAYS.between(it.date, d) <= 30 }.maxOfOrNull { it.durSec } ?: return -1
+        return max(30, (max(longest * 1.1, longest + 300.0) / 300).toInt() * 5)
     }
 
     /**
      * The week's sessions. Three steps build about 8% each, the fourth eases off and re-tests.
-     * A race date tapers the last two weeks; sessions swapped by hand always win.
+     * A race date tapers the last weeks; sessions swapped by hand always win; no easy run outgrows the cap.
      */
     fun weekPlan(mon: LocalDate): WeekPlan {
         val wi = planIndex(mon)
         val pos = wi % 4; val block = wi / 4
         val race = s.raceDate?.takeIf { s.raceKm > 0 && !it.isBefore(mon) }
         val weeksToRace = race?.let { (ChronoUnit.DAYS.between(mon, mondayOf(it)) / 7).toInt() }
-        val taper = when (weeksToRace) { 0 -> .5; 1 -> .75; else -> 1.0 }
+        val inTaper = weeksToRace != null && weeksToRace < taperWeeks
+        // Volume comes down in steps to roughly half; the number of runs and their intensity stay.
+        val taper = if (!inTaper) 1.0 else when (taperWeeks) { 1 -> listOf(.6); 2 -> listOf(.55, .75); else -> listOf(.5, .65, .8) }[weeksToRace!!]
         val f = min(1.8, 1.12.pow(block)) * listOf(1.0, 1.08, 1.16, .85)[pos] * taper
         val r5 = { x: Double -> max(20, (x / 5).roundToInt() * 5) }
         val longCap = if (race == null) 150 else when { s.raceKm <= 5 -> 60; s.raceKm <= 10 -> 90; s.raceKm <= 21.1 -> 130; else -> 180 }
         val easy = min(75, r5(s.easyMin * f)); val long = min(longCap, r5(s.longMin * f))
         val days = s.days.distinct().sorted()
         val ses = HashMap<Int, Session>()
+        val q = qualityDay
         if (days.isNotEmpty()) {
             val longDay = if (s.longDay in days) s.longDay else days.last()
             val others = days.filter { it != longDay }
-            val dist = { d: Int -> abs(d - longDay).let { min(it, 7 - it) } }
-            val q = if (s.quality && days.size >= 4) others.sortedWith(compareByDescending<Int> { dist(it) }.thenBy { it }).first() else null
             val testDay = if (pos == 3) others.firstOrNull { it != q } else null
             for (d in days) ses[d] = when (d) {
                 longDay -> build("long", easy, long)
                 testDay -> build("test", easy, long)
-                q -> build(if (pos == 3) "strides" else listOf("4x4", "tempo", "6x3")[wi % 3], easy, long)
-                else -> if (driftingHard) build("runwalk", easy, long).let { it.copy(detail = it.detail + " Your recent easy runs drifted into Zone 3, so this week builds the habit of staying low.") }
-                else build("easy", easy, long)
+                q -> build(if (inTaper) "tune" else if (pos == 3) "strides" else listOf("4x4", "tempo", "6x3")[wi % 3], easy, long)
+                else -> when {
+                    easyOver == 2 || s.runWalk -> build("runwalk", easy, long).let { if (easyOver == 2) it.copy(detail = it.detail + " Your recent easy days spent a lot of time above ${zb[2] - 1} bpm, so this week builds the habit of staying low.") else it }
+                    easyOver == 1 -> build("easy", easy, long).let { it.copy(detail = it.detail + " Your last few easy days ran above ${zb[2] - 1} bpm: slow down first, and walk the hills." + if (s.talkHr == 0 && s.zoneMethod != "custom") " If that feels like a crawl, the ceiling itself may be off. A talk test checks it." else "") }
+                    else -> build("easy", easy, long)
+                }
             }
         }
-        if (weeksToRace == 0 && race != null) {                       // race week: short easy runs, then the race, then rest
+        if (weeksToRace == 0 && race != null) {                       // race week: short easy runs, one short sharpener, the race, then rest
             val rd = race.dayOfWeek.value
-            for (d in ses.keys.toList()) if (d < rd) ses[d] = build("easy", easy, long) else ses.remove(d)
+            for (d in ses.keys.toList()) if (d < rd) ses[d] = build(if (d == q && rd - d >= 3) "tune" else "easy", easy, long) else ses.remove(d)
             ses[rd] = build("race", easy, long)
         }
         for (d in 1..7) s.overrides[mon.plusDays(d - 1L)]?.let { if (it == "skip") ses.remove(d) else ses[d] = build(it, easy, long) }
+        for ((d, x) in ses.toMap()) if (x.type in setOf("easy", "long")) runCap(mon.plusDays(d - 1L))?.let { cap ->
+            if (cap < 0) { val m = max(20, (x.min * .6 / 5).roundToInt() * 5); if (m < x.min) ses[d] = x.copy(min = m, detail = x.detail + " Kept short on purpose: it's your first month back after a break.") }
+            else if (x.min > cap) ses[d] = x.copy(min = cap, detail = x.detail + " Kept to $cap min: about 10% more than your longest run of the last 30 days. Bigger jumps than that are where injuries come from.")
+        }
         val sorted = ses.toSortedMap()
-        val phase = when (weeksToRace) { 0 -> "Race week"; 1 -> "Taper"; else -> listOf("Build 1", "Build 2", "Build 3", "Recovery + test")[pos] }
+        val phase = when { weeksToRace == 0 -> "Race week"; inTaper -> "Taper"; else -> listOf("Build 1", "Build 2", "Build 3", "Recovery + test")[pos] }
         return WeekPlan(wi, pos, sorted, sorted.values.sumOf { it.min }, phase)
     }
 
@@ -366,6 +484,8 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             "6x3" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + reps(6, 180, 120) + Step("Cool down", 600, 1, 2, "cool")
             "tempo" -> listOf(Step("Warm up", 600, 1, 2, "warm"), Step("Tempo, Zone 3", 1200, 3, 3, "hard"), Step("Cool down", 600, 1, 2, "cool"))
             "test" -> listOf(Step("Warm up", 600, 1, 2, "warm"), Step("Hold $refHr bpm", 1800, 2, 2, "hold"))
+            "tune" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + reps(3, 180, 120) + Step("Cool down", 600, 1, 2, "cool")
+            "talk" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + listOf(1 to 2, 2 to 2, 2 to 3, 3 to 3, 3 to 3, 3 to 4).mapIndexed { i, (lo, hi) -> Step("Stage ${i + 1} of 6. ${if (i == 0) "Easy jog" else "A little faster"}. Say a sentence out loud", 180, lo, hi, "hold") } + Step("Cool down", 300, 1, 2, "cool")
             "runwalk" -> (0 until max(1, m / 300)).flatMap { listOf(Step("Jog", 240, 1, 2, "easy"), Step("Walk", 60, 1, 1, "walk")) }
             "strides" -> listOf(Step("Easy running", max(300, m - 480), 1, 2, "easy")) + (1..6).flatMap { i -> listOf(Step("Stride $i of 6", 20, 3, 5, "hard"), Step("Easy", 60, 1, 2, "easy")) }
             "race" -> listOf(Step("Race", 0, 1, 5, "race"))
@@ -375,12 +495,51 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
 
     val raceDaysLeft: Int? = s.raceDate?.takeIf { s.raceKm > 0 }?.let { ChronoUnit.DAYS.between(today, it).toInt() }?.takeIf { it >= 0 }
 
-    /** Race time projected from the hardest recent effort with Riegel's formula; null without a hard run to go on. */
-    fun racePrediction(): Int? {
+    /**
+     * Race forecast from the best sustained hard effort of the last eight weeks: a whole hard run, or the best
+     * 3, 5 or 10 km inside one, taken from the splits. Interval sessions are left out because their average
+     * includes the recoveries. Riegel's exponent of 1.06 holds up to the half marathon; beyond it most
+     * recreational runners slow more than that, more so on low mileage, so the exponent rises.
+     */
+    fun raceCast(): RaceCast? {
         if (s.raceKm <= 0) return null
-        return runs.filter { ChronoUnit.DAYS.between(it.date, today) in 0..90 && it.distKm >= 3 && (it.type in setOf("hard", "tempo") || (it.avgHr > 0 && zoneOf(it.avgHr) >= 3)) }
-            .minOfOrNull { it.durSec * (s.raceKm / it.distKm).pow(1.06) }?.roundToInt()
+        data class Effort(val km: Double, val sec: Double, val date: LocalDate, val allOut: Boolean)
+        val efforts = ArrayList<Effort>()
+        for (r in runs) {
+            if (ChronoUnit.DAYS.between(r.date, today) !in 0..56 || r.type == "intervals") continue
+            val z = if (r.avgHr > 0) zoneOf(r.avgHr) else 0
+            if (r.distKm >= 3 && (r.type in setOf("race", "hard", "tempo") || z >= 3)) efforts += Effort(r.distKm, r.durSec.toDouble(), r.date, r.type == "race" || z >= 4)
+            for (n in listOf(3, 5, 10)) if (r.splits.size > n) {
+                val best = (0..r.splits.size - n).map { r.splits.subList(it, it + n) }.minBy { w -> w.sumOf { it.sec } }
+                val hr = best.filter { it.hr > 0 }.map { it.hr }.takeIf { it.isNotEmpty() }?.average()?.roundToInt() ?: 0
+                val wz = if (hr > 0) zoneOf(hr) else 0
+                if (wz >= 3 || (hr == 0 && r.type in setOf("race", "hard", "tempo"))) efforts += Effort(n.toDouble(), best.sumOf { it.sec }.toDouble(), r.date, wz >= 4)
+            }
+        }
+        if (efforts.isEmpty()) return null
+        val weekKm = weeks.dropLast(1).takeLast(6).map { it.span.km }.takeIf { it.isNotEmpty() }?.average() ?: 0.0
+        val long = s.raceKm > 22
+        var k = when { !long -> 1.06; weekKm < 40 -> 1.10; else -> 1.08 }
+        // Two all-out efforts of clearly different length show this runner's own fade.
+        val hard = efforts.filter { it.allOut }
+        val short = hard.minByOrNull { it.km }; val far = hard.filter { short != null && it.km >= short.km * 1.8 }.minByOrNull { it.sec / it.km }
+        var own = false
+        if (short != null && far != null) {
+            val fastShort = hard.filter { it.km <= short.km * 1.2 }.minBy { it.sec / it.km }
+            val fit = kotlin.math.ln(far.sec / fastShort.sec) / kotlin.math.ln(far.km / fastShort.km)
+            if (fit in 1.02..1.2) { k = max(k, fit.coerceIn(1.04, 1.15)); own = true }
+        }
+        val pick = efforts.minBy { it.sec * (s.raceKm / it.km).pow(k) }
+        val t = pick.sec * (s.raceKm / pick.km).pow(k)
+        val warn = when {
+            long && weekKm < 40 -> "Marathon forecasts from shorter runs come out optimistic on less than ${U.dist(40.0, 0)} a week. Treat the slow end as the likely one."
+            pick.km < s.raceKm / 4 -> "This comes from a much shorter effort, so the range is wide."
+            else -> ""
+        }
+        return RaceCast(t.roundToInt(), (t * .97).roundToInt(), (t * if (long) 1.07 else if (pick.km < s.raceKm / 4) 1.06 else 1.04).roundToInt(),
+            "your best ${U.dist(pick.km, if (pick.km % 1.0 == 0.0) 0 else 1)} on ${fmtDay(pick.date)}" + if (own) ", and how you fade over distance" else "", warn)
     }
+    fun racePrediction(): Int? = raceCast()?.sec
 
     /** Next planned session that has no run logged against it, within three weeks. */
     fun nextSession(): Pair<LocalDate, Session>? {
@@ -471,16 +630,15 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             out += Note("plain", "Your last run averaged ${last.avgHr} bpm, Zone ${zoneOf(last.avgHr)}. Make the next one properly easy, capped at ${zb[2] - 1} bpm, or take a rest day.")
         if (since >= 5)
             out += Note("warn", "$since days since your last run. Consistency moves Zone 2 pace more than any single session. A 30 minute easy run today is enough.")
-        val mon = mondayOf(today); val a = span(mon.minusDays(7), mon); val c = span(mon, mon.plusDays(7))
-        if (a.km > 5 && c.km > a.km * 1.2)
-            out += Note("warn", "This week is already ${((c.km / a.km - 1) * 100).roundToInt()}% above last week (${U.dist(c.km, 1)} vs ${U.dist(a.km, 1)}). Keep jumps near 10% to stay injury-free.")
-        if (eligible.size >= 4) {
-            val old = eligible.filter { ChronoUnit.DAYS.between(it.first.date, today) >= 21 }.takeLast(2)
-            if (old.isNotEmpty()) {
-                val d = old.map { it.second }.average() - eligible.takeLast(2).map { it.second }.average()
-                if (d >= 5) out += Note("good", "Your Zone 2 estimate is ${U.s(d.roundToInt())} s${U.per} faster than three weeks ago. The base work is paying off.")
-            }
+        // One run much longer than anything in the month before it is the jump that matters; weekly totals are not.
+        if (since <= 3 && last.distKm >= 4) runs.filter { it.date.isBefore(last.date) && ChronoUnit.DAYS.between(it.date, last.date) <= 30 }.maxOfOrNull { it.distKm }?.let { prev ->
+            if (last.distKm > prev * 1.1) out += Note("warn", "Your last run was ${((last.distKm / prev - 1) * 100).roundToInt()}% longer than anything in the 30 days before it (${U.dist(last.distKm, 1)} vs ${U.dist(prev, 1)}). Jumps past 10% are the clearest injury signal in running data. Keep the next few runs short and easy.")
         }
+        // Easy heart rate but a hard feel points at tiredness, not at lost fitness.
+        val rated = runs.filter { it.feel > 0 && it.avgHr > 0 && zoneOf(it.avgHr) <= 2 && ChronoUnit.DAYS.between(it.date, today) in 0..13 }.takeLast(3)
+        if (rated.size >= 2 && rated.count { it.feel >= 4 } >= 2)
+            out += Note("warn", "Your easy runs have felt hard lately even though your heart rate stayed low. That usually means tiredness, heat or short sleep. Take an extra rest day before the next hard session.")
+        paceChange()?.let { if (it.real && it.delta >= 5 && it.since == "4 weeks ago") out += Note("good", "Your Zone 2 pace is ${U.s(it.delta.roundToInt())} s${U.per} faster than four weeks ago, and that is more than the usual wobble between runs. The base work is paying off.") }
         val lastTest = runs.lastOrNull { it.type == "test" }
         if (runs.size >= 3 && (lastTest == null || ChronoUnit.DAYS.between(lastTest.date, today) > 28))
             out += Note("plain", "No Zone 2 test in the last 4 weeks. Run 30 min at $refHr bpm on a flat route and log it as a test. It is the cleanest read on your progress.")
@@ -573,6 +731,19 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             if (to != null && from != null && live("days:$from>$to")) out += Suggestion("days:$from>$to", "Move ${DAY_NAMES[from - 1]}'s run to ${DAY_NAMES[to - 1]}?",
                 "You've run on ${DAY_NAMES[to - 1]} in ${weeksRunOn(to)} of the last 4 weeks and not once on ${DAY_NAMES[from - 1]}. The plan can match what you actually do.", "Move it", MoveDay(from, to))
         }
+        if (s.zoneMethod != "custom" && !s.hrMeds) {
+            // Offered once a talk test has been run: the number only the runner knows.
+            if (s.talkHr == 0 && s.overrides.any { (d, k) -> k == "talk" && !d.isAfter(today) && runsOn(d).isNotEmpty() } && live("talkhr"))
+                out += Suggestion("talkhr", "What was your talking ceiling?", "The highest heart rate in your talk test at which a full sentence still came out comfortably. It becomes the top of your Zone 2.", "Save", EnterTalk)
+            // A formula's max is a guess. A heart rate actually reached, twice, or once in a run that was hard throughout, is not.
+            val seen = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 0..365 && it.maxHr in (s.maxHr + 3)..215 && it.durSec >= 600 }.sortedByDescending { it.maxHr }
+            val top = seen.getOrNull(1)?.maxHr ?: seen.firstOrNull()?.takeIf { it.avgHr >= it.maxHr * .8 }?.maxHr
+            if (top != null && live("max:$top")) out += Suggestion("max:$top", "Raise your max heart rate to $top?", "You've reached $top bpm on a run, above the ${s.maxHr} your zones are built on. Using the real number moves every zone up a little.", "Use $top", SetMax(top))
+            if (s.talkHr == 0 && runs.size >= 3 && s.overrides.none { (d, k) -> k == "talk" && !d.isBefore(today) } && live("talk"))
+                out += Suggestion("talk", "Check your Zone 2 with a talk test?", "Your zones come from a formula, and for many people formulas miss by ten beats or more. A 35-minute talk test finds your own ceiling.", "Add it to my plan", TalkTest)
+        }
+        if (s.runWalk && easyRecent.size >= 3 && easyRecent.takeLast(3).none { overCeiling(it) } && easyRecent.takeLast(3).all { it.durSec >= 1200 } && live("runwalk"))
+            out += Suggestion("runwalk", "Ready to drop the walk breaks?", "Your last three easy runs stayed in Zone 2. Easy days can become continuous runs; walk whenever your heart rate climbs.", "Plan easy runs", RunWalk(false))
         usualRunMin?.let { u ->
             val want = max(0, u - 60)
             if (!s.remindOn) { if (live("remind:on")) out += Suggestion("remind:on", "Want a nudge at ${fmtClock(want)}?", "You usually run around ${fmtClock(u)}. One reminder an hour before, only on days with something to say.", "Remind me", Remind(want)) }
@@ -581,25 +752,30 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         return out
     }
 
-    /** How Zone 2 pace has moved: against four weeks ago when there is history, otherwise against the start. */
+    /**
+     * How Zone 2 pace has moved: against four weeks ago when there is history, otherwise against the start.
+     * It only counts as real when the new median sits outside the middle half of the earlier readings.
+     */
     fun paceChange(): PaceChange? {
-        val c = current ?: return null
-        val old = eligible.filter { ChronoUnit.DAYS.between(it.first.date, today) >= 28 }.takeLast(3)
-        if (old.isNotEmpty() && eligible.size > old.size) return PaceChange(old.map { it.second }.average() - c, "4 weeks ago")
-        if (eligible.size >= 3) return PaceChange(baseline!! - c, "when you started")
+        val n = now ?: return null
+        val then = reading(today.minusDays(28))
+        if (then != null && ests.any { it.run.date.isAfter(today.minusDays(28)) }) {
+            val d = then.pace - n.pace
+            return PaceChange(d, "4 weeks ago", n.n >= 3 && then.n >= 3 && abs(d) >= 3 && (n.pace < then.lo || n.pace > then.hi))
+        }
+        if (ests.size >= 3) { val d = baseline!! - n.pace; return PaceChange(d, "when you started", abs(d) >= max(5.0, (n.hi - n.lo) / 2)) }
         return null
     }
 
-    /** How much to trust the Zone 2 estimate. Easy runs and tests read it directly; hard runs only hint at it. */
+    /** How much to trust the Zone 2 estimate. Steady easy runs and tests read it directly; hard runs only hint at it. */
     fun confidence(): Confidence? {
-        if (eligible.isEmpty()) return null
-        val recent = eligible.takeLast(5).map { it.first }
-        val easyRuns = recent.count { it.avgHr > 0 && zoneOf(it.avgHr) <= 2 }
-        val test = recent.any { it.type == "test" && ChronoUnit.DAYS.between(it.date, today) <= 35 }
+        val n = now ?: return null
+        val test = runs.any { it.type == "test" && ChronoUnit.DAYS.between(it.date, today) in 0..35 }
+        val clean = ests.count { it.clean && ChronoUnit.DAYS.between(it.run.date, today) <= 42 }
         return when {
-            test || easyRuns >= 3 -> Confidence(2, "Solid estimate", "Based on runs done at Zone 2 heart rate.")
-            easyRuns >= 1 -> Confidence(1, "Fair estimate", "Sharpens with two more easy runs or a Zone 2 test.")
-            else -> Confidence(0, "Rough estimate", "Worked out from harder runs. One easy run at Zone 2 heart rate will firm it up.")
+            n.clean && (n.n >= 5 || test) -> Confidence(2, "Solid estimate", "The middle of ${n.n} steady easy runs.")
+            n.clean || clean >= 1 -> Confidence(1, "Fair estimate", "Sharpens with a few more steady easy runs or a Zone 2 test.")
+            else -> Confidence(0, "Rough estimate", "Worked out from harder runs. Three steady runs near $refHr bpm will firm it up.")
         }
     }
 

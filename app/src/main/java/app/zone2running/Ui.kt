@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -279,9 +281,36 @@ fun Glyph(name: String, color: Color, modifier: Modifier = Modifier.size(22.dp))
     }
 }
 
+/** How did it feel? One tap, five answers. Tapping the chosen one again clears it. */
+@Composable
+fun EffortRow(feel: Int, onPick: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Label(if (feel > 0) "Felt ${FEELS[feel - 1].lowercase()}" else "How did it feel?")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FEELS.forEachIndexed { i, n -> Pick(n, feel == i + 1, Modifier.weight(1f)) { onPick(if (feel == i + 1) 0 else i + 1) } }
+        }
+    }
+}
+
+/** The talk-test result: one number, the highest heart rate at which talking was still comfortable. */
+@Composable
+fun TalkEntry(e: Engine, save: (Int) -> Unit) {
+    var v by remember { mutableStateOf(if (e.s.talkHr > 0) "${e.s.talkHr}" else "") }
+    var err by remember { mutableStateOf("") }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Field("Talking ceiling (bpm)", v, Modifier.weight(1f), "${e.zb[2] - 1}") { v = it }
+        Btn("Save") {
+            val n = v.toIntOrNull() ?: 0
+            // Anything outside a believable Zone 2 top is more likely a typo than a finding.
+            if (n in (e.s.restHr + 30)..(e.s.maxHr - 8)) { err = ""; save(n) } else err = "That should sit between ${e.s.restHr + 30} and ${e.s.maxHr - 8} bpm for you."
+        }
+    }
+    if (err.isNotEmpty()) Small(err, LocalPal.current.warnInk)
+}
+
 /** Which icon stands for a session kind. */
 fun glyphFor(kind: String) = when (kind) {
-    "long" -> "road"; "tempo" -> "ramp"; "4x4", "6x3", "intervals" -> "bars"; "test" -> "target"; "runwalk" -> "walk"
+    "long" -> "road"; "tempo" -> "ramp"; "4x4", "6x3", "tune", "intervals" -> "bars"; "test", "talk" -> "target"; "runwalk" -> "walk"
     "strides" -> "bolt"; "race" -> "flag"; "rest" -> "moon"; "strength" -> "dumbbell"; else -> "heart"
 }
 
@@ -289,7 +318,7 @@ fun glyphFor(kind: String) = when (kind) {
 @Composable
 fun SessionArt(kind: String, modifier: Modifier = Modifier.size(44.dp), done: Boolean = false) {
     val p = LocalPal.current
-    val hard = kind in setOf("tempo", "4x4", "6x3", "intervals", "race")
+    val hard = kind in setOf("tempo", "4x4", "6x3", "tune", "talk", "intervals", "race")
     val quiet = kind == "rest" || kind == "strength"
     val bg = when { done -> p.accent; hard -> p.warnBg; quiet -> p.surface2; else -> p.goodBg }
     val fg = when { done -> p.accentInk; hard -> p.warnInk; quiet -> p.muted; else -> p.goodInk }

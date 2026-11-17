@@ -103,7 +103,7 @@ fun App(vm: AppVM) {
             sharing != null -> sharing = null
             guide -> rerunGuide = false; live != null -> live = null; reward != null -> vm.celebration = null; form != null -> form = null
             lesson != null -> lesson = null; run != null -> runId = null
-            more == "menu" -> more = null; more == "privacy" || more == "licences" -> more = "about"; else -> more = "menu"
+            more == "menu" -> more = null; more == "privacy" || more == "licences" -> more = "about"; more?.startsWith("settings/") == true -> more = "settings"; else -> more = "menu"
         }
     }
 
@@ -169,7 +169,7 @@ fun TabBar(tab: Int, onTab: (Int) -> Unit) {
                     Box(Modifier.clip(RoundedCornerShape(50)).background(if (on) p.goodBg else androidx.compose.ui.graphics.Color.Transparent).padding(horizontal = 20.dp, vertical = 5.dp)) {
                         Glyph(glyph, if (on) p.goodInk else p.muted, Modifier.size(22.dp))
                     }
-                    Text(name, fontFamily = BodyFont, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, fontSize = 12.5.sp, color = if (on) p.ink else p.muted, maxLines = 1)
+                    Text(name, fontFamily = BodyFont, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, fontSize = 13.sp, color = if (on) p.ink else p.muted, maxLines = 1)
                 }
             }
         }

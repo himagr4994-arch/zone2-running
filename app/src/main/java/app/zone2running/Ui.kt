@@ -46,7 +46,7 @@ data class Pal(
 )
 
 val LightPal = Pal(
-    Color(0xFFEDF1F0), Color(0xFFFFFFFF), Color(0xFFF2F6F5), Color(0xFF10201D), Color(0xFF566864), Color(0xFFD3DDDA),
+    Color(0xFFEDF1F0), Color(0xFFFFFFFF), Color(0xFFF2F6F5), Color(0xFF10201D), Color(0xFF465753), Color(0xFFD3DDDA),
     Color(0xFF0B8573), Color(0xFFFFFFFF), Color(0xFFD9631E),
     Color(0xFF0B3A34), Color(0xFFEAF6F3), Color(0xFF9CC3BB), Color(0xFF1C554D), Color(0xFFFFD166),
     listOf(Color(0xFF7C93A6), Color(0xFF0B8573), Color(0xFFC99A12), Color(0xFFD9631E), Color(0xFFC7343A)),
@@ -54,7 +54,7 @@ val LightPal = Pal(
     Color(0xFFB8860B), Color(0xFF008C72), listOf(Color(0xFFA8703A), Color(0xFF7F8E98), Color(0xFFC29A12)), Color(0xFFC7343A),
 )
 val DarkPal = Pal(
-    Color(0xFF0B1312), Color(0xFF131E1C), Color(0xFF1A2826), Color(0xFFE4EEEB), Color(0xFF8DA29D), Color(0xFF273734),
+    Color(0xFF0B1312), Color(0xFF131E1C), Color(0xFF1A2826), Color(0xFFE4EEEB), Color(0xFFA3B6B1), Color(0xFF273734),
     Color(0xFF3CC4AD), Color(0xFF06211D), Color(0xFFC96A30),
     Color(0xFF0F2E2A), Color(0xFFEAF6F3), Color(0xFF8FB8B0), Color(0xFF1E4A43), Color(0xFFFFD166),
     listOf(Color(0xFF8FA6B8), Color(0xFF3CC4AD), Color(0xFFE0B63A), Color(0xFFF08A4B), Color(0xFFEF6A6F)),
@@ -97,7 +97,7 @@ fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> 
 }
 
 @Composable fun Label(t: String, color: Color = LocalPal.current.muted) =
-    Text(t.uppercase(), fontSize = 12.sp, letterSpacing = 1.1.sp, fontWeight = FontWeight.SemiBold, color = color, fontFamily = BodyFont)
+    Text(t.uppercase(), fontSize = 12.5.sp, letterSpacing = 1.1.sp, fontWeight = FontWeight.SemiBold, color = color, fontFamily = BodyFont)
 
 @Composable fun Head(t: String, size: Int = 22, color: Color = LocalPal.current.ink, modifier: Modifier = Modifier) =
     Text(t, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = size.sp, lineHeight = (size * 1.15).sp, color = color, modifier = modifier)
@@ -106,7 +106,7 @@ fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> 
     Text(t, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = color, modifier = modifier)
 
 @Composable fun Small(t: String, color: Color = LocalPal.current.muted, modifier: Modifier = Modifier, align: TextAlign? = null) =
-    Text(t, fontFamily = BodyFont, fontSize = 13.5.sp, lineHeight = 18.sp, color = color, modifier = modifier, textAlign = align)
+    Text(t, fontFamily = BodyFont, fontSize = 14.sp, lineHeight = 19.sp, color = color, modifier = modifier, textAlign = align)
 
 @Composable
 fun Btn(text: String, modifier: Modifier = Modifier, ghost: Boolean = false, danger: Boolean = false, small: Boolean = false, onClick: () -> Unit) {
@@ -173,8 +173,8 @@ fun ZoneStrip(e: Engine) {
             Column(Modifier.fillMaxWidth().padding(vertical = 7.dp, horizontal = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 val ink = if (i == 1) p.goodInk else p.ink
                 Text("Z${i + 1}", fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = ink)
-                Text(if (i < 4) "${e.zb[i]}–${e.zb[i + 1] - 1}" else "${e.zb[i]}+", fontSize = 12.sp, color = ink, fontFamily = BodyFont, maxLines = 1)
-                Text(names[i], fontSize = 11.5.sp, color = ink, fontFamily = BodyFont, maxLines = 1)
+                Text(if (i < 4) "${e.zb[i]}–${e.zb[i + 1] - 1}" else "${e.zb[i]}+", fontSize = 13.sp, color = ink, fontFamily = BodyFont, maxLines = 1)
+                Text(names[i], fontSize = 12.5.sp, color = ink, fontFamily = BodyFont, maxLines = 1)
             }
         }
     }
@@ -198,14 +198,16 @@ fun Medal(b: Badge, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null
             Canvas(Modifier.fillMaxSize()) {
                 val r = size.minDimension / 2
                 if (b.got) {
-                    drawCircle(ring, r - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
-                    drawCircle(p.surface2, r - 5.dp.toPx())
-                    drawCircle(ring, r - 5.dp.toPx(), style = Stroke(3.dp.toPx()))
-                } else drawCircle(p.line, r - 3.dp.toPx(), style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))))
+                    // Earned: a solid disc in the tier's colour with a pale rim, so it reads as a medal from across the grid.
+                    drawCircle(ring, r - 1.dp.toPx())
+                    drawCircle(Color.White.copy(alpha = .55f), r - 5.dp.toPx(), style = Stroke(1.5.dp.toPx()))
+                } else drawCircle(p.line, r - 3.dp.toPx(), style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 9f))))
             }
-            Text(b.glyph, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = if (b.glyph.length > 4) 14.sp else 17.sp, color = if (b.got) p.ink else p.muted)
+            Text(b.glyph, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = if (b.glyph.length > 4) 14.sp else 17.sp, color = if (b.got) Color(0xFF10201D) else p.muted.copy(alpha = .7f))
         }
-        Text(b.name, fontSize = 11.5.sp, lineHeight = 14.sp, color = if (b.got) p.ink else p.muted, fontFamily = BodyFont, textAlign = TextAlign.Center, maxLines = 2)
+        // Four badges share a row, so the name stops growing before long words start breaking in half.
+        val cap = minOf(1f, 1.12f / androidx.compose.ui.platform.LocalDensity.current.fontScale)
+        Text(b.name, fontSize = (12.5f * cap).sp, lineHeight = (15f * cap).sp, color = if (b.got) p.ink else p.muted, fontWeight = if (b.got) FontWeight.SemiBold else FontWeight.Normal, fontFamily = BodyFont, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
 
@@ -329,6 +331,12 @@ fun glyphFor(kind: String) = when (kind) {
     "strides" -> "bolt"; "race" -> "flag"; "rest" -> "moon"; "strength" -> "dumbbell"; else -> "heart"
 }
 
+/** One word for a session kind, for places too small for its full title. */
+fun kindWord(kind: String) = when (kind) {
+    "long" -> "Long"; "tempo" -> "Tempo"; "4x4", "6x3", "tune", "intervals" -> "Hard"; "test", "talk" -> "Test"
+    "race" -> "Race"; "rest" -> "Rest"; "strength" -> "Gym"; else -> "Easy"
+}
+
 /** A session's picture: its icon on a soft disc, tinted by how hard the session is. */
 @Composable
 fun SessionArt(kind: String, modifier: Modifier = Modifier.size(44.dp), done: Boolean = false) {
@@ -352,7 +360,7 @@ fun Fold(glyph: String, title: String, summary: String, startOpen: Boolean = fal
             Glyph(glyph, p.muted, Modifier.size(22.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = p.ink)
-                if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 13.5.sp, lineHeight = 18.sp, color = p.muted, maxLines = if (open) 6 else 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 14.sp, lineHeight = 19.sp, color = p.muted, maxLines = if (open) 6 else 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Glyph("down", p.muted, Modifier.size(18.dp).graphicsLayerRotate(turn))
         }
@@ -371,7 +379,7 @@ fun Link(glyph: String, title: String, summary: String, onClick: () -> Unit) {
         Glyph(glyph, p.muted, Modifier.size(22.dp))
         Column(Modifier.weight(1f)) {
             Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = p.ink)
-            if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 13.5.sp, lineHeight = 18.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (summary.isNotEmpty()) Text(summary, fontFamily = BodyFont, fontSize = 14.sp, lineHeight = 19.sp, color = p.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         Glyph("right", p.muted, Modifier.size(18.dp))
     }

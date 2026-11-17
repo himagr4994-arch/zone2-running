@@ -33,8 +33,9 @@ private fun Toggle(title: String, sub: String, on: Boolean, onChange: (Boolean) 
     }
 }
 
+/** Settings. [sub] is "" for the short main page, or the name of one of the pages a tap deeper. */
 @Composable
-fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () -> Unit) {
+fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () -> Unit, sub: String = "", open: (String) -> Unit = {}) {
     val p = LocalPal.current
     val s = vm.settings
 
@@ -48,7 +49,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     var long by remember(s) { mutableStateOf("${s.longMin}") }
     var error by remember { mutableStateOf("") }
 
-    Panel {
+    if (sub == "") Panel {
         Head("Target")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Field("Zone 2 pace (min${U.per})", target, Modifier.weight(1f), fmtPace(420.0), KeyboardType.Ascii) { target = it }
@@ -60,6 +61,36 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
             Field("Max HR (bpm)", maxHr, Modifier.weight(1f)) { maxHr = it }
             Field("Resting HR (bpm)", rest, Modifier.weight(1f)) { rest = it }
         }
+        ZoneStrip(e)
+        Small(if (s.talkHr > 0) "Zone 2 tops out at ${s.talkHr} bpm, from your talk test." else "Zones come from the ${if (s.zoneMethod == "custom") "numbers you entered" else "formula"}. A talk test finds your own Zone 2 ceiling.")
+        Head("Session length")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Field("Easy run, minutes", easy, Modifier.weight(1f)) { easy = it }
+            Field("Long run, minutes", long, Modifier.weight(1f)) { long = it }
+        }
+        if (error.isNotEmpty()) NoteBox(Note("warn", error))
+        Btn("Save changes") {
+            val tp = U.paceToKm(parseDur(target)); val mh = maxHr.toIntOrNull() ?: 0; val rh = rest.toIntOrNull() ?: 0
+            val rf = ref.toIntOrNull() ?: 0
+            val em = easy.toIntOrNull() ?: 0; val lm = long.toIntOrNull() ?: 0
+            error = when {
+                tp !in 180..900 -> "Enter the target pace like ${fmtPace(420.0)}."
+                mh !in 120..230 -> "Max HR should be between 120 and 230."
+                rh !in 30..110 || mh - rh < 50 -> "Check resting HR. It should be 30–110 and well below max."
+                ref.isNotBlank() && rf !in 80..200 -> "Reference HR should be 80–200, or leave it blank."
+                em !in 15..90 -> "Easy run should be 15–90 minutes."
+                lm !in 30..180 -> "Long run should be 30–180 minutes."
+                else -> ""
+            }
+            if (error.isEmpty()) {
+                vm.updateSettings { it.copy(targetPace = tp, maxHr = mh, restHr = rh, refHr = rf, easyMin = em, longMin = lm) }
+                vm.toast = "Saved"
+            }
+        }
+    }
+
+    if (sub == "zones") Panel {
+        Head("Zones")
         Small("Zone method")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf("hrr" to "HR reserve", "max" to "% of max", "custom" to "From my watch").forEach { (k, v) ->
@@ -80,34 +111,17 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
                 if (s.talkHr > 0) Btn("Use the formula", ghost = true, small = true) { vm.setTalk(0) }
             }
         }
-        Head("Session length")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Field("Easy run, minutes", easy, Modifier.weight(1f)) { easy = it }
-            Field("Long run, minutes", long, Modifier.weight(1f)) { long = it }
-        }
-        if (error.isNotEmpty()) NoteBox(Note("warn", error))
-        Btn("Save changes") {
-            val tp = U.paceToKm(parseDur(target)); val mh = maxHr.toIntOrNull() ?: 0; val rh = rest.toIntOrNull() ?: 0
-            val rf = ref.toIntOrNull() ?: 0; val z = cz.map { it.toIntOrNull() ?: 0 }
-            val em = easy.toIntOrNull() ?: 0; val lm = long.toIntOrNull() ?: 0
-            error = when {
-                tp !in 180..900 -> "Enter the target pace like ${fmtPace(420.0)}."
-                mh !in 120..230 -> "Max HR should be between 120 and 230."
-                rh !in 30..110 || mh - rh < 50 -> "Check resting HR. It should be 30–110 and well below max."
-                ref.isNotBlank() && rf !in 80..200 -> "Reference HR should be 80–200, or leave it blank."
-                s.zoneMethod == "custom" && !(z[0] > 60 && z.zipWithNext().all { (a, b) -> b > a } && z[3] < 230) -> "Custom zones must rise from Zone 2 to Zone 5."
-                em !in 15..90 -> "Easy run should be 15–90 minutes."
-                lm !in 30..180 -> "Long run should be 30–180 minutes."
-                else -> ""
-            }
-            if (error.isEmpty()) {
-                vm.updateSettings { it.copy(targetPace = tp, maxHr = mh, restHr = rh, refHr = rf, customZ = if (s.zoneMethod == "custom") z else it.customZ, easyMin = em, longMin = lm) }
-                vm.toast = "Saved"
+        if (s.zoneMethod == "custom") {
+            if (error.isNotEmpty()) NoteBox(Note("warn", error))
+            Btn("Save zones") {
+                val z = cz.map { it.toIntOrNull() ?: 0 }
+                error = if (!(z[0] > 60 && z.zipWithNext().all { (a, b) -> b > a } && z[3] < 230)) "Custom zones must rise from Zone 2 to Zone 5." else ""
+                if (error.isEmpty()) { vm.updateSettings { it.copy(customZ = z) }; vm.toast = "Saved" }
             }
         }
     }
 
-    Panel {
+    if (sub == "") Panel {
         Head("Training week")
         Small("Running days")
         DayPicker(s.days) { d -> vm.updateSettings { it.copy(days = if (d in it.days) it.days - d else (it.days + d).sorted()) } }
@@ -119,7 +133,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         Btn("Restart the plan from this week", ghost = true, small = true) { vm.updateSettings { it.copy(planStart = mondayOf(LocalDate.now())) }; vm.toast = "Plan restarted" }
     }
 
-    Panel {
+    if (sub == "") Panel {
         Head("Units")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Pick("Kilometres", !s.miles, Modifier.weight(1f)) { vm.updateSettings { it.copy(miles = false) } }
@@ -127,15 +141,36 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         }
     }
 
-    RacePanel(vm, e)
+    if (sub == "") Panel {
+        Head("More settings")
+        val onOff = { b: Boolean -> if (b) "on" else "off" }
+        listOf(
+            Triple("zones", "Zones and talk test", if (s.talkHr > 0) "Zone 2 tops out at ${s.talkHr} bpm, from your talk test" else "Zone 2 is ${e.zb[1]}–${e.zb[2] - 1} bpm"),
+            Triple("race", "Race goal", s.raceDate?.let { "${s.raceName.ifBlank { "Race" }} · ${e.raceDaysLeft ?: 0} days to go" } ?: "Not set"),
+            Triple("live", "Live run", "Voice ${onOff(s.voiceOn)}, tones ${onOff(s.beepsOn)}, street map ${onOff(s.mapTiles)}"),
+            Triple("weather", "Weather", if (s.weatherOn) "On for ${s.city}" else "Off"),
+            Triple("motivation", "Badges and reminders", "Badges ${onOff(s.gameOn)}, reminder ${if (s.remindOn) "at ${fmtClock(s.remindMin)}" else "off"}"),
+            Triple("connect", "Health Connect", if (vm.healthGranted) "Connected" else "Not connected"),
+            Triple("data", "Backup and your data", if (s.backupTree.isEmpty()) "No daily backup yet" else "Daily backup on"),
+            Triple("health", "Health check", if (s.caution) "Set to see a doctor first" else "Two questions about your health"),
+        ).forEachIndexed { i, (k, title, about) ->
+            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+            Row(Modifier.fillMaxWidth().clickable { open(k) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) { Text(title, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 16.5.sp, color = p.ink); Small(about) }
+                Glyph("right", p.muted, Modifier.size(18.dp))
+            }
+        }
+    }
 
-    Panel {
+    if (sub == "race") RacePanel(vm, e)
+
+    if (sub == "health") Panel {
         Head("Health check")
         SafetyQuestions(s.caution, s.hrMeds) { c, m -> vm.updateSettings { it.copy(caution = c, hrMeds = m) } }
         Small(STOP_SIGNS, p.ink)
     }
 
-    Panel {
+    if (sub == "live") Panel {
         Head("Live run")
         Toggle("Spoken cues", "Block changes, a 10-second warning before each hard rep, each kilometre, and a nudge when you leave Zone 2. Vibration stays on either way.", s.voiceOn) { v -> vm.updateSettings { it.copy(voiceOn = v) } }
         Toggle("Soft tones", "Two low notes over the last two seconds of a block and a higher one on the change. Music is turned down for a moment, not stopped.", s.beepsOn) { v -> vm.updateSettings { it.copy(beepsOn = v) } }
@@ -147,7 +182,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         } else Small("Pick a heart-rate sensor on the screen before a run starts.")
     }
 
-    Panel {
+    if (sub == "weather") Panel {
         Head("Weather")
         var city by remember(s.city) { mutableStateOf(s.city) }
         if (s.weatherOn) {
@@ -161,13 +196,13 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         Small("This is the one feature that uses the internet. The app sends only the town's coordinates, a few times a day, to Open-Meteo. No account, no key. Weather data by Open-Meteo.com (CC BY 4.0).")
     }
 
-    Panel {
+    if (sub == "motivation") Panel {
         Head("Motivation")
         Toggle("Levels, streaks, quests and badges", "Turn off for a calmer app: progress, plan and coaching only.", s.gameOn) { v -> vm.updateSettings { it.copy(gameOn = v) } }
         ReminderPicker(s.remindOn, s.remindMin) { on, m -> vm.setReminder(on, m) }
     }
 
-    Panel {
+    if (sub == "connect") Panel {
         Head("Health Connect")
         val ask = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { vm.refreshHealth() }
         when {
@@ -188,7 +223,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         }
     }
 
-    Panel {
+    if (sub == "data") Panel {
         Head("Your data")
         Body("Everything is stored on this phone. There is no account and no server.")
         var confirmRestore by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -217,7 +252,7 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         }
     }
 
-    Panel {
+    if (sub == "") Panel {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Btn("Setup guide", ghost = true, onClick = rerunGuide)
             Btn("Replay Dil's intro", ghost = true, onClick = replayIntro)

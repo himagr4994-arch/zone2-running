@@ -305,11 +305,38 @@ fun ProgressScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (Form
         return
     }
 
+    // The question the whole app exists to answer comes first, in words, with the distance left to the goal.
+    Panel(Modifier.rise(1)) {
+        val cur = e.current; val tg = e.s.targetPace.toDouble(); val ch = e.paceChange()
+        Label("Am I getting faster at Zone 2?")
+        val (answer, why) = when {
+            cur == null -> "Too early to say" to "Log a steady run with heart rate and your Zone 2 pace appears here."
+            cur <= tg -> "You've reached your target" to "You're holding ${fmtPace(tg)} ${U.per} at an easy heart rate. Set a faster target in Settings."
+            ch == null -> "Too early to say" to "A trend needs steady runs spread over a few weeks."
+            ch.real && ch.delta >= 3 -> "Yes, ${U.s(ch.delta.roundToInt())} seconds faster" to "Compared with ${ch.since}, and more than the usual wobble between runs."
+            ch.real && ch.delta <= -3 -> "Not right now, ${U.s((-ch.delta).roundToInt())} seconds slower" to "Compared with ${ch.since}. Heat, poor sleep and hard weeks all show up here before fitness does."
+            else -> "Holding level" to "About the same as ${ch.since}. A few seconds either way is normal wobble between runs."
+        }
+        Head(answer, 26)
+        Body(why, p.muted)
+        if (cur != null) {
+            Row {
+                for ((v, l) in listOf(fmtPace(cur) to "now, ${U.per.trim()}", fmtPace(tg) to "target", (if (cur <= tg) "Done" else fmtPace(cur - tg)) to "to go"))
+                    Column(Modifier.weight(1f)) { Text(v, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 30.sp, color = p.ink); Small(l) }
+            }
+            val start = e.eligible.firstOrNull()?.second
+            if (start != null && start > tg && cur > tg) {
+                Meter(((start - cur) / (start - tg)).toFloat().coerceIn(0f, 1f) * enter(900, 200))
+                Small(if (start - cur >= 3) "${U.s((start - cur).roundToInt())} seconds gained since you started at ${fmtPace(start)}." else "You started at ${fmtPace(start)}. The bar fills as the pace comes down.")
+            }
+        }
+    }
+
     Column(Modifier.rise(1), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         var scrub by remember { mutableStateOf<Int?>(null) }
         val tick = haptic()
         val pts = e.eligible
-        Head("Zone 2 pace", 20)
+        Head("The trend, run by run", 20)
         if (pts.isEmpty()) Body("Your trend appears once you log a run with average heart rate.", p.muted)
         else {
             val at = pts[scrub ?: pts.lastIndex]
@@ -331,8 +358,11 @@ fun ProgressScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (Form
     Column(Modifier.rise(2), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         var pick by remember { mutableStateOf<Int?>(null) }
         val tick = haptic()
-        Head("Weekly minutes", 20)
         val base = mondayOf(e.today); val wi = pick ?: 7
+        val ranWeeks = (0..7).count { w -> base.minusWeeks(w.toLong()).let { m -> e.span(m, m.plusDays(7)).let { it.easy + it.hard > 0 } } }
+        Head("Consistency", 20)
+        Body("You ran in $ranWeeks of the last 8 weeks. Showing up week after week is what moves the pace.", p.muted)
+        Label("Weekly minutes")
         val wmon = base.minusWeeks((7 - wi).toLong()); val sp = e.span(wmon, wmon.plusDays(7))
         Small("Week of ${fmtDay(wmon)}: ${sp.easy.roundToInt()} easy, ${sp.hard.roundToInt()} harder, ${U.dist(sp.km, 1)}." + if (pick == null) " Tap a bar." else "", p.ink)
         Legend(p.easy to "Easy (Zone 1–2)", p.hard to "Zone 3 and above")
@@ -390,7 +420,7 @@ private fun Legend(vararg items: Pair<Color, String>) {
 }
 
 private fun DrawScope.label(text: String, x: Float, y: Float, color: Color, align: Paint.Align, bold: Boolean = false) {
-    val paint = Paint().apply { isAntiAlias = true; textSize = 11.5.sp.toPx(); this.color = color.toArgb(); textAlign = align; typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT }
+    val paint = Paint().apply { isAntiAlias = true; textSize = 12.5.sp.toPx(); this.color = color.toArgb(); textAlign = align; typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT }
     drawContext.canvas.nativeCanvas.drawText(text, x, y, paint)
 }
 

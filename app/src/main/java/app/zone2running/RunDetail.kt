@@ -59,7 +59,7 @@ fun RunCharts(e: Engine, r: Run, d: Debrief) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).padding(vertical = 12.dp).then(gesture)) {
             HeartCanvas(e, r, d, at, Modifier.fillMaxWidth().height(210.dp))
             if (r.pace.count { it > 0 } >= 12) {
-                Text("PACE", Modifier.padding(start = 12.dp, top = 10.dp), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, letterSpacing = 1.sp, color = p.muted)
+                Text("PACE", Modifier.padding(start = 12.dp, top = 10.dp), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, letterSpacing = 1.sp, color = p.muted)
                 PaceCanvas(r, at, Modifier.fillMaxWidth().height(70.dp))
             }
             TimeAxis(r.durSec, Modifier.fillMaxWidth().height(18.dp))
@@ -91,7 +91,7 @@ private fun HeartCanvas(e: Engine, r: Run, d: Debrief, at: Int?, modifier: Modif
             val top = if (z == 4) hi else minOf(hi, e.zb[z + 1].toFloat()); val bot = maxOf(lo, if (z == 0) lo else e.zb[z].toFloat())
             if (top <= bot) continue
             drawRect(p.zones[z].copy(alpha = if (z == 1) .20f else .11f), Offset(0f, y(top)), Size(size.width, y(bot) - y(top)))
-            if (y(bot) - y(top) > 16.dp.toPx()) drawText(measurer.measure("Z${z + 1}", TextStyle(color = p.muted, fontSize = 11.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold)), topLeft = Offset(8.dp.toPx(), y(top) + 3.dp.toPx()))
+            if (y(bot) - y(top) > 16.dp.toPx()) drawText(measurer.measure("Z${z + 1}", TextStyle(color = p.muted, fontSize = 12.5.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold)), topLeft = Offset(8.dp.toPx(), y(top) + 3.dp.toPx()))
         }
         // The session's blocks: a tint behind the line, and a coloured strip along the bottom.
         d.blocks.forEachIndexed { i, b ->
@@ -138,7 +138,7 @@ private fun TimeAxis(durSec: Int, modifier: Modifier) {
         val every = when { durSec <= 1500 -> 300; durSec <= 4200 -> 600; else -> 1200 }
         var t = every
         while (t < durSec - every / 3) {
-            val txt = measurer.measure("${t / 60}′", TextStyle(color = p.muted, fontSize = 11.sp, fontFamily = BodyFont))
+            val txt = measurer.measure("${t / 60}′", TextStyle(color = p.muted, fontSize = 12.5.sp, fontFamily = BodyFont))
             drawText(txt, topLeft = Offset(size.width * t / durSec - txt.size.width / 2f, 3.dp.toPx())); t += every
         }
     }
@@ -198,7 +198,7 @@ fun ZoneRows(e: Engine, zoneSec: List<Int>) {
             Text("Z${z + 1} ${names[z]}", Modifier.width(92.dp), fontFamily = BodyFont, fontSize = 13.5.sp, color = p.ink)
             Box(Modifier.weight(1f)) { Box(Modifier.fillMaxWidth((zoneSec[z].toFloat() / top).coerceAtLeast(.012f)).height(10.dp).clip(RoundedCornerShape(5.dp)).background(p.zones[z])) }
             Text(mmss(zoneSec[z]), Modifier.width(48.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, color = p.ink)
-            Text("${zoneSec[z] * 100 / zoneSec.sum()}%", Modifier.width(34.dp), fontFamily = BodyFont, fontSize = 12.5.sp, color = p.muted)
+            Text("${zoneSec[z] * 100 / zoneSec.sum()}%", Modifier.width(34.dp), fontFamily = BodyFont, fontSize = 13.sp, color = p.muted)
         }
     }
 }
@@ -207,8 +207,8 @@ fun ZoneRows(e: Engine, zoneSec: List<Int>) {
 fun FactTile(f: Fact, modifier: Modifier) {
     val p = LocalPal.current
     Column(modifier.clip(RoundedCornerShape(14.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(f.label.uppercase(), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, letterSpacing = 1.sp, color = p.muted, maxLines = 1)
+        Text(f.label.uppercase(), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, letterSpacing = 1.sp, color = p.muted, maxLines = 1)
         Text(f.value, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 28.sp, color = p.ink, maxLines = 1)
-        if (f.note.isNotEmpty()) Text(f.note, fontFamily = BodyFont, fontSize = 12.5.sp, lineHeight = 16.sp, color = p.muted, maxLines = 2)
+        if (f.note.isNotEmpty()) Text(f.note, fontFamily = BodyFont, fontSize = 13.sp, lineHeight = 17.sp, color = p.muted, maxLines = 2)
     }
 }

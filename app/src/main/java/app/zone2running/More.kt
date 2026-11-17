@@ -63,7 +63,12 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
     val p = LocalPal.current
     when (page) {
         "learn" -> { Header("Learn") { go("menu") }; LearnScreen(vm.settings, openLesson) }
-        "settings" -> { Header("Settings") { go("menu") }; SetupScreen(vm, e, replayIntro, rerunGuide) }
+        "settings" -> { Header("Settings") { go("menu") }; SetupScreen(vm, e, replayIntro, rerunGuide, "") { go("settings/$it") } }
+        "settings/zones", "settings/race", "settings/live", "settings/weather", "settings/motivation", "settings/connect", "settings/data", "settings/health" -> {
+            val sub = page.substringAfter("/")
+            Header(mapOf("zones" to "Zones", "race" to "Race goal", "live" to "Live run", "weather" to "Weather", "motivation" to "Badges and reminders", "connect" to "Health Connect", "data" to "Your data", "health" to "Health check")[sub] ?: "Settings") { go("settings") }
+            SetupScreen(vm, e, replayIntro, rerunGuide, sub)
+        }
         "about" -> {
             Header("About") { go("menu") }
             Panel {
@@ -136,7 +141,7 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
             Panel {
                 MenuRow("Learn", "$done of ${LESSONS.size} two-minute lessons done") { go("learn") }
                 Divider()
-                MenuRow("Settings", "Target, heart rate, training week, units, race, weather, reminders, backup") { go("settings") }
+                MenuRow("Settings", "Target pace, heart rate, training week, and everything else") { go("settings") }
                 Divider()
                 MenuRow("About", "Version ${BuildConfig.VERSION_NAME}, privacy policy, licences, help") { go("about") }
             }

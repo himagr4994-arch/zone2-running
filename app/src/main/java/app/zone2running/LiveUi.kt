@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.drawText
 
-private fun clock(sec: Int) = "${sec / 60}:${(sec % 60).toString().padStart(2, '0')}"
+fun clock(sec: Int) = "${sec / 60}:${(sec % 60).toString().padStart(2, '0')}"
 
 /** The run itself: a briefing before the start, then heart rate, the current block, time, distance and pace. */
 @Composable

@@ -175,7 +175,7 @@ private fun WeekDots(e: Engine, mon: LocalDate) {
         for (i in 0..6) {
             val d = mon.plusDays(i.toLong()); val ses = plan.ses[i + 1]; val ran = e.runsOn(d).isNotEmpty(); val today = d == e.today
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(DOW[i].take(1), fontSize = 12.sp, fontFamily = BodyFont, fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.ink else p.muted)
+                Text(DOW[i].take(1), fontSize = 13.sp, fontFamily = BodyFont, fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.ink else p.muted)
                 Box(Modifier.size(30.dp).clip(CircleShape).background(if (ran) p.accent else Color.Transparent)
                     .then(when { ran -> Modifier; ses != null && d.isBefore(e.today) -> Modifier.border(2.dp, p.warnInk.copy(alpha = .5f), CircleShape); ses != null -> Modifier.border(2.dp, if (today) p.ink else p.line, CircleShape); else -> Modifier }),
                     contentAlignment = Alignment.Center) {
@@ -343,7 +343,7 @@ fun PaceArea(pts: List<Pair<Run, Double>>, targetPace: Double, today: LocalDate,
         val ty = y(targetPace)
         drawLine(target.copy(alpha = .55f), Offset(0f, ty), Offset(size.width, ty), 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f)))
         drawContext.canvas.nativeCanvas.drawText("target", size.width - 20.dp.toPx(), ty + 15.dp.toPx(),
-            Paint().apply { isAntiAlias = true; textSize = 11.5.sp.toPx(); color = muted.toArgb(); textAlign = Paint.Align.RIGHT })
+            Paint().apply { isAntiAlias = true; textSize = 12.5.sp.toPx(); color = muted.toArgb(); textAlign = Paint.Align.RIGHT })
         val ys = pts.map { y(it.second) }
         val curve = Path().apply {
             moveTo(if (pts.size == 1) 0f else x[0], ys[0])
@@ -389,11 +389,16 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
             for (i in 0..6) {
                 val d = mon.plusDays(i.toLong()); val s = plan.ses[i + 1]; val ran = e.runsOn(d).isNotEmpty(); val today = d == e.today
                 val shape = RoundedCornerShape(14.dp)
-                Column(Modifier.weight(1f).clip(shape).background(if (i == sel) p.surface else Color.Transparent).then(if (i == sel) Modifier.border(1.dp, p.line, shape) else Modifier)
+                val hardDay = kinds[i] in setOf("tempo", "4x4", "6x3", "tune", "talk", "intervals", "race", "test"); val quietDay = kinds[i] == "rest" || kinds[i] == "strength"
+                Column(Modifier.weight(1f).clip(shape).background(if (i == sel) p.surface else Color.Transparent).then(if (i == sel) Modifier.border(2.dp, p.accent, shape) else Modifier)
                     .clickable { tick(false); sel = i }.padding(vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(DOW[i], fontSize = 12.sp, fontFamily = BodyFont, fontWeight = if (today) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.accent else p.muted)
+                    Text(DOW[i], fontSize = 13.sp, fontFamily = BodyFont, fontWeight = if (today || i == sel) FontWeight.SemiBold else FontWeight.Normal, color = if (today) p.accent else if (i == sel) p.ink else p.muted)
                     SessionArt(kinds[i], Modifier.size(34.dp), done = ran)
-                    Text(if (s != null) "${s.min}" else "·", fontSize = 12.sp, fontFamily = BodyFont, color = if (s != null && !ran && d.isBefore(e.today) && !onBreak) p.warnInk else p.muted)
+                    // The kind of day in a word, so the week reads without learning the icons.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (ran && s == null) "Run" else kindWord(kinds[i]), fontSize = 12.5.sp, lineHeight = 15.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, maxLines = 1, color = if (hardDay) p.hard else if (quietDay) p.muted else p.accent)
+                        Text(if (s != null) "${s.min}′" else " ", fontSize = 12.5.sp, lineHeight = 15.sp, fontFamily = BodyFont, maxLines = 1, color = if (s != null && !ran && d.isBefore(e.today) && !onBreak) p.warnInk else p.muted)
+                    }
                 }
             }
         }
@@ -470,7 +475,7 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
                         }
                         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) { Glyph(g, fg, Modifier.fillMaxSize(.5f)) }
-                            Text(fmtDay(w.mon).substringBefore(" "), fontSize = 11.sp, color = p.muted, fontFamily = BodyFont)
+                            Text(fmtDay(w.mon).substringBefore(" "), fontSize = 12.5.sp, color = p.muted, fontFamily = BodyFont)
                         }
                     }
                     repeat(8 - recent.size) { Spacer(Modifier.weight(1f)) }
@@ -495,4 +500,4 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
 
 @Composable
 fun Tag(t: String, bg: Color, fg: Color) =
-    Text(t, Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 9.dp, vertical = 2.dp), color = fg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, fontFamily = BodyFont)
+    Text(t, Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 9.dp, vertical = 2.dp), color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, fontFamily = BodyFont)

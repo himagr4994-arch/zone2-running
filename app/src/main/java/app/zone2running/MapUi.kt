@@ -146,7 +146,7 @@ fun RouteMap(route: List<Int>, trace: List<Int>, e: Engine, streets: Boolean, mo
             val w = (nice / metresPerPx).toFloat(); val by = size.height - 14.dp.toPx(); val bx = 14.dp.toPx()
             val ink = if (streets) Color(0xFF10201D) else p.muted
             drawLine(ink, Offset(bx, by), Offset(bx + w, by), 2.dp.toPx(), cap = StrokeCap.Round)
-            drawText(measurer.measure(if (U.miles) f2(nice / 1609.344) + " mi" else if (nice >= 1000) "${nice / 1000} km" else "$nice m", TextStyle(color = ink, fontSize = 11.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold)), topLeft = Offset(bx, by - 18.dp.toPx()))
+            drawText(measurer.measure(if (U.miles) f2(nice / 1609.344) + " mi" else if (nice >= 1000) "${nice / 1000} km" else "$nice m", TextStyle(color = ink, fontSize = 12.5.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold)), topLeft = Offset(bx, by - 18.dp.toPx()))
         }
         if (streets) Text("© OpenStreetMap contributors", Modifier.align(Alignment.BottomEnd).padding(6.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xCCFFFFFF)).padding(horizontal = 5.dp, vertical = 1.dp),
             fontFamily = BodyFont, fontSize = 10.sp, color = Color(0xFF10201D))

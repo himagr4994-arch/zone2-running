@@ -30,7 +30,7 @@ def shot(label):
 
 def nodes():
     """Every visible piece of text on screen with the centre of its box."""
-    for _ in range(6):
+    for _ in range(12):
         adb("shell", "uiautomator", "dump", "/sdcard/ui.xml")
         xml = adb("shell", "cat", "/sdcard/ui.xml")
         if xml.strip().startswith("<?xml"):
@@ -41,6 +41,13 @@ def nodes():
                 if label and m:
                     x0, y0, x1, y1 = map(int, m.groups())
                     out.append((label, (x0 + x1) // 2, (y0 + y1) // 2))
+            # A slow emulator sometimes says a system app has hung. That is the machine, not this app: wait and look again.
+            if any("isn't responding" in t for t, _, _ in out):
+                for t, x, y in out:
+                    if t == "Wait":
+                        adb("shell", "input", "tap", str(x), str(y))
+                time.sleep(8)
+                continue
             return out
         time.sleep(1.5)
     fail("could not read the screen")
@@ -89,6 +96,8 @@ def fail(msg):
     sys.exit(1)
 
 
+time.sleep(20)          # let a freshly booted emulator settle
+adb("shell", "input", "keyevent", "82")
 adb("uninstall", PKG)
 adb("install", "-r", apk, check=True, timeout=300)
 for p in ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"]:

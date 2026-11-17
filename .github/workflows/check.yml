@@ -45,9 +45,13 @@ jobs:
         with:
           api-level: 34
           arch: x86_64
-          target: google_apis
-          profile: pixel_6
+          target: default
+          profile: pixel_5
+          cores: 2
+          ram-size: 3072M
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          emulator-boot-timeout: 900
           script: |
             python3 ci/smoke.py regular.apk regular
             python3 ci/smoke.py lean.apk lean

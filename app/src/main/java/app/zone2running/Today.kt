@@ -93,10 +93,15 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     TextLink("Log it instead") { openForm(FormSeed(date = lead.date ?: e.today, type = lead.session?.type ?: "easy")) }
                     TextLink(if (details) "Hide details" else "Details") { details = !details }
+                    TextLink("Free run") { openLive(e.freeRun()) }
                 }
             }
-            lead.kind == "rest" && nextLesson != null -> BigBtn("2-minute lesson", "book") { openLesson(nextLesson) }
-            else -> BigBtn("See plan", "calendar", ghost = true, onClick = openPlan)
+            // Nothing planned today: a free run is the obvious thing to offer.
+            lead.kind == "rest" -> BigBtn("Start a free run", "play") { openLive(e.freeRun()) }
+            else -> {
+                BigBtn("See plan", "calendar", ghost = true, onClick = openPlan)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { TextLink("Start a free run") { openLive(e.freeRun()) } }
+            }
         }
         AnimatedVisibility(details || !hasAction) {
             Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -154,7 +159,7 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
         e.review()?.takeIf { e.today.dayOfWeek.value <= 2 }?.let { rv ->
             Fold("chart", "Last week", "${rv.n} of ${rv.planned} runs · ${U.dist(rv.km, 1)}" + (rv.easyShare?.let { " · $it% easy" } ?: "")) { NoteBox(Note(if (rv.state == WeekState.HIT) "good" else "plain", rv.line)) }
         }
-        if (nextLesson != null && !(lead.kind == "rest")) Link("book", "Two-minute lesson", nextLesson.title) { openLesson(nextLesson) }
+        if (nextLesson != null) Link("book", "Two-minute lesson", nextLesson.title) { openLesson(nextLesson) }
         val notes = e.coach()
         if (notes.isNotEmpty() && e.runs.isNotEmpty()) Fold("bolt", "Coach notes", notes.first().text) { notes.forEach { NoteBox(it) } }
         if (vm.health.available() && !vm.healthGranted) Link("plus", "Import runs automatically", "Connect Health Connect in Settings", openSetup)

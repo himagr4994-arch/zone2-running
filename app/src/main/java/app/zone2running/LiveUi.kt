@@ -56,10 +56,10 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Dil("hello", Modifier.size(64.dp))
-            Column { Label("Guided run"); Head("${session.title} · ${session.min} min") }
+            Column { Label(if (session.kind == "free") "Free run" else "Guided run"); Head(if (session.min > 0) "${session.title} · ${session.min} min" else "Run as you like") }
         }
         Body(session.detail)
-        steps.take(8).forEachIndexed { i, st ->
+        (if (session.kind == "free") emptyList() else steps.take(8)).forEachIndexed { i, st ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Dot(p.zones[(st.zHi - 1).coerceIn(0, 4)])
@@ -68,6 +68,10 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
             }
         }
         if (steps.size > 8) Small("…and ${steps.size - 8} more blocks.")
+        // A free run has no plan to keep it sensible, so say where the safe edge is.
+        if (session.kind == "free") e.runs.filter { java.time.temporal.ChronoUnit.DAYS.between(it.date, e.today) in 0..30 }.maxByOrNull { it.durSec }?.let {
+            NoteBox(Note("plain", "Your longest run of the last 30 days was ${it.durSec / 60} minutes (${U.dist(it.distKm, 1)}). Going more than about 10% past that is where injuries tend to come from."))
+        }
         if (steps.any { it.kind == "hard" || it.kind == "race" }) Small(STOP_SIGNS)
     }
     GpsMeter()
@@ -114,6 +118,7 @@ private fun liveState(snap: LiveSnap, e: Engine): LiveState {
     val over = easyBlock && snap.hr >= e.zb[2]
     return when {
         snap.paused -> LiveState(false, "Paused", "The clock and distance are stopped.")
+        snap.stepKind == "free" -> LiveState(false, if (snap.hr > 0) listOf("Recovery", "Easy", "Steady", "Hard", "Max")[(snap.zone - 1).coerceIn(0, 4)] else "Free run", "Free run: no targets, just recording.")
         snap.hr == 0 -> LiveState(false, if (easyBlock) "Keep it easy" else "Go hard", if (easyBlock) "No heart-rate sensor. Full sentences mean Zone 2." else "No heart-rate sensor. Hard but repeatable: a few words at a time.")
         over -> LiveState(true, "Ease off", "Above Zone 2. Ease off or walk until you're under ${e.zb[2]}.")
         easyBlock -> LiveState(false, if (snap.zone == 2) "In Zone 2" else "Nice and easy", "In the easy range. Cap is ${e.zb[2] - 1} bpm.")
@@ -159,7 +164,7 @@ fun LiveRunning(e: Engine, streets: Boolean = false) {
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Who is listening: GPS and the sensor, as two quiet lights.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text((TYPE_NAMES[Live.type] ?: "Run").uppercase(), Modifier.weight(1f), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 22.sp, letterSpacing = 1.sp, color = Ink)
+            Text(if (Live.kind == "free") "FREE RUN" else (TYPE_NAMES[Live.type] ?: "Run").uppercase(), Modifier.weight(1f), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 22.sp, letterSpacing = 1.sp, color = Ink)
             Light(if (snap.acc >= 0 && snap.gps != "GPS lost") "GPS ±${snap.acc} m" else "GPS", snap.gps == "GPS locked", if (snap.acc >= 0 && snap.gps != "GPS lost") gpsColor(snap.acc) else null)
             Spacer(Modifier.width(12.dp)); Light("HR", snap.hr > 0)
         }

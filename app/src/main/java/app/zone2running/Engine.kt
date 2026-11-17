@@ -529,6 +529,9 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         return WeekPlan(wi, pos, sorted, sorted.values.sumOf { it.min }, phase)
     }
 
+    /** A run with no plan behind it: no blocks, no targets, no Zone 2 cue. It is recorded and read afterwards like any other. */
+    fun freeRun() = Session("easy", "Free run", 0, "No blocks and no targets. I'll record time, distance, pace and heart rate, and work out afterwards what kind of run it was.", "free")
+
     /** The blocks of a session, for the guided run. */
     fun steps(x: Session): List<Step> {
         val m = x.min * 60
@@ -543,6 +546,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             "runwalk" -> (0 until max(1, m / 300)).flatMap { listOf(Step("Jog", 240, 1, 2, "easy"), Step("Walk", 60, 1, 1, "walk")) }
             "strides" -> listOf(Step("Easy running", max(300, m - 480), 1, 2, "easy")) + (1..6).flatMap { i -> listOf(Step("Stride $i of 6", 20, 3, 5, "hard"), Step("Easy", 60, 1, 2, "easy")) }
             "race" -> listOf(Step("Race", 0, 1, 5, "race"))
+            "free" -> listOf(Step("Free run", 0, 1, 5, "free"))
             else -> listOf(Step("Warm up", 300, 1, 2, "warm"), Step(if (x.type == "long") "Long easy running" else "Easy running", max(300, m - 300), 1, 2, "easy"))
         }
     }

@@ -554,4 +554,17 @@ class EngineTest {
         assertEquals(SetRest(54), sg.single().act)
         assertTrue(Engine(s.copy(hcRest = 58, snoozed = mapOf("talk" to today)), listOf(tenK), today).suggestions().isEmpty())     // two beats is not worth a question
     }
+
+    @Test fun freeRunHasNoBlocksAndNoZoneTwoCue() {
+        val e = Engine(s, emptyList(), today)
+        val st = e.steps(e.freeRun())
+        assertEquals(1, st.size); assertEquals(0, st[0].sec)
+        val tr = RunTracker(st, e.zb)
+        val ev = (1..900).flatMap { tr.tick(175) }                       // fifteen minutes in Zone 5
+        assertTrue(ev.none { it.kind in setOf("cap", "beep", "warn", "tick", "step", "half") })
+        // The same heart rate on a planned easy run is told to ease off.
+        assertTrue(RunTracker(e.steps(Session("easy", "", 30, "")), e.zb).let { t2 -> (1..900).flatMap { t2.tick(175) } }.any { it.kind == "cap" })
+        assertEquals("free", tr.toRun(today, "easy", 600, "free").kind)
+        assertEquals("hard", e.guessType(900, 175)); assertEquals("easy", e.guessType(900, 140))
+    }
 }

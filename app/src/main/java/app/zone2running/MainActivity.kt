@@ -77,7 +77,9 @@ fun App(vm: AppVM) {
     LaunchedEffect(vm.toast) { vm.toast?.let { snack.showSnackbar(it); vm.toast = null } }
     // A finished live run arrives here: save it, or ask for the distance when GPS recorded none.
     LaunchedEffect(Live.result) {
-        Live.result?.let { r -> Live.result = null; live = null; if (r.distKm >= 0.1) vm.saveRun(r, isNew = true) else form = FormSeed(run = r, fresh = true) }
+        Live.result?.let { r -> Live.result = null; live = null; // A free run had no label going in: name it from how hard it turned out to be.
+            val run = if (r.kind == "free") r.copy(type = e.guessType(r.durSec, r.avgHr)) else r
+            if (run.distKm >= 0.1) vm.saveRun(run, isNew = true) else form = FormSeed(run = run, fresh = true) }
     }
 
     // A discarded run goes back home, not to the briefing it started from.

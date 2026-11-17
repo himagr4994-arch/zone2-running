@@ -336,4 +336,14 @@ class ScreensTest {
         rule.setContent { AppTheme { androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().background(LocalPal.current.bg).padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp)) { RunPage(vm.engine(), r, rate = {}, edit = {}) {} } } }
         rule.waitForIdle(); rule.onNodeWithText("ROUTE").assertExists(); shot("run-rich-route")
     }
+
+    @Test @Config(qualifiers = "w412dp-h1250dp-xhdpi") fun planShowsWhatEachBlockAsksFor() {
+        val vm = seeded()
+        vm.updateSettings { it.copy(days = (1..7).toList(), overrides = mapOf(today to "talk")) }
+        rule.setContent { AppTheme { App(vm) } }
+        tab("Plan"); rule.onNodeWithText("What you'll do").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Stage 2 of 6. A touch faster. Say a sentence out loud").assertExists(); shot("plan-talk-test")
+        vm.updateSettings { it.copy(overrides = mapOf(today to "4x4")) }; rule.waitForIdle()
+        rule.onAllNodesWithText("162–174 bpm")[0].assertExists(); shot("plan-intervals-blocks")
+    }
 }

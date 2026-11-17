@@ -308,6 +308,21 @@ fun TalkEntry(e: Engine, save: (Int) -> Unit) {
     if (err.isNotEmpty()) Small(err, LocalPal.current.warnInk)
 }
 
+/**
+ * One block of a session: a dot in the colour of the zone it aims for, what to do, the heart rate to hold, how long.
+ * Blocks with no heart-rate target (the talk test's stages, a free run) get a plain dot.
+ */
+@Composable
+fun StepRow(e: Engine, x: Step) {
+    val p = LocalPal.current
+    val aim = e.target(x)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Dot(if (x.kind in setOf("talk", "free", "race")) p.muted else p.zones[(x.zHi - 1).coerceIn(0, 4)])
+        Column(Modifier.weight(1f)) { Body(x.label); if (aim.isNotEmpty()) Small(aim) }
+        Small(if (x.sec == 0) "open" else if (x.sec >= 60) "${x.sec / 60} min" else "${x.sec} s")
+    }
+}
+
 /** Which icon stands for a session kind. */
 fun glyphFor(kind: String) = when (kind) {
     "long" -> "road"; "tempo" -> "ramp"; "4x4", "6x3", "tune", "intervals" -> "bars"; "test", "talk" -> "target"; "runwalk" -> "walk"

@@ -98,7 +98,7 @@ private fun HeartCanvas(e: Engine, r: Run, d: Debrief, at: Int?, modifier: Modif
             val x0 = xs(b.from); val x1 = xs(b.to)
             val tint = when (b.step.kind) { "hard", "race" -> p.zones[3].copy(alpha = .16f); "walk" -> p.zones[0].copy(alpha = .22f); else -> if (i % 2 == 0) Color.Transparent else p.ink.copy(alpha = .035f) }
             drawRect(tint, Offset(x0, 0f), Size(x1 - x0, h))
-            drawRoundRect(p.zones[(b.step.zHi - 1).coerceIn(0, 4)], Offset(x0 + 1.dp.toPx(), size.height - strip), Size((x1 - x0 - 2.dp.toPx()).coerceAtLeast(1f), strip), CornerRadius(2.dp.toPx()))
+            drawRoundRect(if (b.step.kind == "talk") p.muted else p.zones[(b.step.zHi - 1).coerceIn(0, 4)], Offset(x0 + 1.dp.toPx(), size.height - strip), Size((x1 - x0 - 2.dp.toPx()).coerceAtLeast(1f), strip), CornerRadius(2.dp.toPx()))
         }
         // The line takes the colour of the zone it is in.
         val last = ((tr.size - 1) * draw).toInt()
@@ -165,7 +165,7 @@ fun BlockRows(e: Engine, blocks: List<BlockStat>) {
             first = false
             Column(Modifier.padding(vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(p.zones[(b.step.zHi - 1).coerceIn(0, 4)]))
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(if (b.step.kind == "talk") p.muted else p.zones[(b.step.zHi - 1).coerceIn(0, 4)]))
                     Text(names[i], Modifier.weight(1f), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink, maxLines = 1)
                     Small(mmss(b.to - b.from))
                     Text("${b.avg}", fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, color = p.ink)

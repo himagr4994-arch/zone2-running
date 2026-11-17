@@ -567,4 +567,19 @@ class EngineTest {
         assertEquals("free", tr.toRun(today, "easy", 600, "free").kind)
         assertEquals("hard", e.guessType(900, 175)); assertEquals("easy", e.guessType(900, 140))
     }
+
+    @Test fun blocksShowTheHeartRateToHoldExceptOnTheTalkTest() {
+        val e = Engine(s, emptyList(), today)
+        val iv = e.steps(Session("intervals", "", 50, "", "4x4"))
+        assertEquals("under 150 bpm", e.target(iv[0])); assertEquals("162–174 bpm", e.target(iv[1])); assertEquals("under 150 bpm", e.target(iv[2]))
+        assertEquals("walk", e.target(e.steps(Session("easy", "", 30, "", "runwalk"))[1]))
+        val talk = e.steps(Session("tempo", "Talk test", 35, "", "talk"))
+        assertEquals(8, talk.size); assertEquals(35 * 60 - 120, talk.sumOf { it.sec })
+        assertTrue(talk.subList(1, 7).all { it.kind == "talk" && e.target(it) == "" })
+        assertEquals("under 150 bpm", e.target(talk[0]))                 // the warm-up is still an ordinary easy block
+        // No "ease off" during the stages, however high the heart rate goes.
+        val tr = RunTracker(talk, e.zb)
+        assertTrue((1..1670).flatMap { tr.tick(if (it > 600) 170 else 130) }.none { it.kind == "cap" })
+        assertEquals("full sentences", Engine(s.copy(hrMeds = true), emptyList(), today).target(iv[0]))
+    }
 }

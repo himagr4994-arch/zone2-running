@@ -409,7 +409,7 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Label("${DAY_NAMES[sel]} ${fmtDay(d)}" + if (today) " · today" else "")
                     Head(s?.title ?: if (kinds[sel] == "strength") "Strength, 20 min" else "Rest")
-                    if (s != null) Small("${s.min} min · " + if (s.type in setOf("tempo", "intervals")) "hard day" else "cap ${e.zb[2] - 1} bpm")
+                    if (s != null) Small("${s.min} min · " + if (s.kind == "talk") "finds your Zone 2 ceiling" else if (s.type in setOf("tempo", "intervals")) "hard day" else "cap ${e.zb[2] - 1} bpm")
                 }
                 if (rs.isEmpty() && s != null && d.isBefore(e.today) && !onBreak) Tag("Missed", p.warnBg, p.warnInk)
             }
@@ -418,11 +418,8 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
             if (s != null) {
                 AnimatedVisibility(showSteps) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        e.steps(s).let { st -> st.take(10).forEach { x ->
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Dot(p.zones[(x.zHi - 1).coerceIn(0, 4)]); Body(x.label, modifier = Modifier.weight(1f)); Small(if (x.sec == 0) "open" else if (x.sec >= 60) "${x.sec / 60} min" else "${x.sec} s")
-                            }
-                        }; if (st.size > 10) Small("…and ${st.size - 10} more blocks.") }
+                        e.steps(s).let { st -> st.take(10).forEach { x -> StepRow(e, x) }; if (st.size > 10) Small("…and ${st.size - 10} more blocks.") }
+                        if (s.kind == "talk") NoteBox(Note("plain", "Ignore the zones today. Watch your heart rate and note it at the last stage where a full sentence still came out comfortably."))
                     }
                 }
             }

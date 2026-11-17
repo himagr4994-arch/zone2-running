@@ -61,11 +61,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
         Body(session.detail)
         (if (session.kind == "free") emptyList() else steps.take(8)).forEachIndexed { i, st ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Dot(p.zones[(st.zHi - 1).coerceIn(0, 4)])
-                Body(st.label, modifier = Modifier.weight(1f))
-                Small(if (st.sec == 0) "open" else if (st.sec >= 60) "${st.sec / 60} min" else "${st.sec} s")
-            }
+            StepRow(e, st)
         }
         if (steps.size > 8) Small("…and ${steps.size - 8} more blocks.")
         // A free run has no plan to keep it sensible, so say where the safe edge is.
@@ -118,6 +114,7 @@ private fun liveState(snap: LiveSnap, e: Engine): LiveState {
     val over = easyBlock && snap.hr >= e.zb[2]
     return when {
         snap.paused -> LiveState(false, "Paused", "The clock and distance are stopped.")
+        snap.stepKind == "talk" -> LiveState(false, "Say a sentence", "Talk test: ignore the zones. Note your heart rate while talking is still comfortable.")
         snap.stepKind == "free" -> LiveState(false, if (snap.hr > 0) listOf("Recovery", "Easy", "Steady", "Hard", "Max")[(snap.zone - 1).coerceIn(0, 4)] else "Free run", "Free run: no targets, just recording.")
         snap.hr == 0 -> LiveState(false, if (easyBlock) "Keep it easy" else "Go hard", if (easyBlock) "No heart-rate sensor. Full sentences mean Zone 2." else "No heart-rate sensor. Hard but repeatable: a few words at a time.")
         over -> LiveState(true, "Ease off", "Above Zone 2. Ease off or walk until you're under ${e.zb[2]}.")
@@ -289,11 +286,11 @@ private fun ZoneDial(snap: LiveSnap, e: Engine, st: Step?, zones: List<Color>, m
         val gap = .006f
         for (i in 0..4) {
             val a = if (i == 0) 0f else (e.zb[i] - lo) / (hi - lo); val b = if (i == 4) 1f else (e.zb[i + 1] - lo) / (hi - lo)
-            val target = (i + 1) in tLo..tHi
+            val target = (i + 1) in tLo..tHi && tHi - tLo < 4          // a block with no target (talk test, free run) highlights nothing
             arc(zones[i].copy(alpha = if (target) 1f else .38f), a + gap, b - a - 2 * gap, if (target) thick else thin)
         }
         // The two numbers that bound the target, written just outside the arc.
-        listOf(e.zb[tLo - 1], e.zb[tHi.coerceAtMost(4)] - if (tHi <= 4) 0 else 0).distinct().forEach { bpm ->
+        (if (tHi - tLo >= 4) emptyList() else listOf(e.zb[tLo - 1], e.zb[tHi.coerceAtMost(4)])).distinct().forEach { bpm ->
             val f = (bpm - lo) / (hi - lo); val txt = measurer.measure("$bpm", androidx.compose.ui.text.TextStyle(color = Dim, fontSize = 13.sp, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold))
             val o = point(f, r + thick * .5f + 14.dp.toPx())
             drawText(txt, topLeft = androidx.compose.ui.geometry.Offset(o.x - txt.size.width / 2f, o.y - txt.size.height / 2f))
@@ -313,8 +310,10 @@ private fun SessionProfile(steps: List<Step>, index: Int, progress: Float, zones
         val usable = size.width - gap * (steps.size - 1); var x = 0f
         steps.forEachIndexed { i, s ->
             val w = usable * (if (s.sec > 0) s.sec else 600) / total
-            val h = size.height * listOf(.3f, .45f, .65f, .85f, 1f)[(s.zHi - 1).coerceIn(0, 4)]
-            val c = zones[(s.zHi - 1).coerceIn(0, 4)]; val rad = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+            // Talk-test stages climb like steps, because each is a touch faster, but carry no zone colour.
+            val h = size.height * if (s.kind == "talk") .4f + .1f * steps.take(i).count { it.kind == "talk" } else listOf(.3f, .45f, .65f, .85f, 1f)[(s.zHi - 1).coerceIn(0, 4)]
+            val talk = s.kind == "talk"
+            val c = if (talk) Dim else zones[(s.zHi - 1).coerceIn(0, 4)]; val rad = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
             drawRoundRect(c.copy(alpha = if (i < index) 1f else .3f), androidx.compose.ui.geometry.Offset(x, size.height - h), androidx.compose.ui.geometry.Size(w, h), rad)
             if (i == index) {
                 drawRoundRect(c, androidx.compose.ui.geometry.Offset(x, size.height - h), androidx.compose.ui.geometry.Size(w * progress.coerceIn(0f, 1f), h), rad)

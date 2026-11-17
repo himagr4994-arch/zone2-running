@@ -457,7 +457,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             "tempo" -> Session("tempo", "Tempo 20 min", 40, "10 min easy, 20 min steady ${if (feel) "" else "in Zone 3 ($z3), "}comfortably hard: short sentences only. 10 min easy.")
             "6x3" -> Session("intervals", "6 × 3 min hard", 50, "10 min easy, 6 × 3 min $hardCue. 2 min jog between, 10 min easy.", "6x3")
             "tune" -> Session("intervals", "Race tune-up", 35, "10 min easy, 3 × 3 min $hardCue. 2 min jog between, 10 min easy. Short on purpose: it keeps the legs sharp while the week stays light.", "tune")
-            "talk" -> Session("tempo", "Talk test", 35, "10 min easy, then six 3-minute stages, each a little faster than the last. Near the end of every stage say a full sentence out loud, about 30 words. Note your heart rate in the last stage where talking was still comfortable: that is the top of your Zone 2.", "talk")
+            "talk" -> Session("tempo", "Talk test", 35, "10 min easy, then six 3-minute stages, each a touch faster than the last. Near the end of every stage say a full sentence out loud, about 30 words. Ignore the zones today: note your heart rate in the last stage where talking was still comfortable. That number is the top of your Zone 2.", "talk")
             "runwalk" -> Session("easy", "Easy run-walk", easy, "Jog 4 min, walk 1 min${if (feel) ", at an effort where you can chat" else ", and keep HR $z2"}. Run-walk is a normal way to train in Zone 2, not a step back.", "runwalk")
             "race" -> Session("race", s.raceName.ifBlank { "Race day" }, ((racePrediction() ?: (s.raceKm * 390).roundToInt()) / 60.0).roundToInt(),
                 "Start slower than feels right for the first third, settle, and save the push for the end. Good luck.")
@@ -529,6 +529,19 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         return WeekPlan(wi, pos, sorted, sorted.values.sumOf { it.min }, phase)
     }
 
+    /**
+     * What a block asks of the heart, in a few words, for showing beside it. Empty where a number would mislead:
+     * the talk test is there to find the Zone 2 ceiling, so its stages go by feel, never by the formula's zones.
+     */
+    fun target(x: Step): String = when {
+        x.kind in setOf("talk", "free", "race", "hold") -> ""
+        x.kind == "walk" -> "walk"
+        s.hrMeds -> if (x.zHi <= 2) "full sentences" else "a few words at a time"
+        x.zHi >= 5 -> "fast and relaxed"
+        x.zLo <= 1 -> "under ${zb[x.zHi]} bpm"
+        else -> "${zb[x.zLo - 1]}–${zb[x.zHi] - 1} bpm"
+    }
+
     /** A run with no plan behind it: no blocks, no targets, no Zone 2 cue. It is recorded and read afterwards like any other. */
     fun freeRun() = Session("easy", "Free run", 0, "No blocks and no targets. I'll record time, distance, pace and heart rate, and work out afterwards what kind of run it was.", "free")
 
@@ -542,7 +555,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             "tempo" -> listOf(Step("Warm up", 600, 1, 2, "warm"), Step("Tempo, Zone 3", 1200, 3, 3, "hard"), Step("Cool down", 600, 1, 2, "cool"))
             "test" -> listOf(Step("Warm up", 600, 1, 2, "warm"), Step("Hold $refHr bpm", 1800, 2, 2, "hold"))
             "tune" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + reps(3, 180, 120) + Step("Cool down", 600, 1, 2, "cool")
-            "talk" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + listOf(1 to 2, 2 to 2, 2 to 3, 3 to 3, 3 to 3, 3 to 4).mapIndexed { i, (lo, hi) -> Step("Stage ${i + 1} of 6. ${if (i == 0) "Easy jog" else "A little faster"}. Say a sentence out loud", 180, lo, hi, "hold") } + Step("Cool down", 300, 1, 2, "cool")
+            "talk" -> listOf(Step("Warm up", 600, 1, 2, "warm")) + (0 until 6).map { i -> Step("Stage ${i + 1} of 6. ${if (i == 0) "Your usual easy pace" else "A touch faster"}. Say a sentence out loud", 180, 1, 5, "talk") } + Step("Cool down", 300, 1, 2, "cool")
             "runwalk" -> (0 until max(1, m / 300)).flatMap { listOf(Step("Jog", 240, 1, 2, "easy"), Step("Walk", 60, 1, 1, "walk")) }
             "strides" -> listOf(Step("Easy running", max(300, m - 480), 1, 2, "easy")) + (1..6).flatMap { i -> listOf(Step("Stride $i of 6", 20, 3, 5, "hard"), Step("Easy", 60, 1, 2, "easy")) }
             "race" -> listOf(Step("Race", 0, 1, 5, "race"))

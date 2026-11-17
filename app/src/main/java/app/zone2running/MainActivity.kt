@@ -80,6 +80,10 @@ fun App(vm: AppVM) {
         Live.result?.let { r -> Live.result = null; live = null; if (r.distKm >= 0.1) vm.saveRun(r, isNew = true) else form = FormSeed(run = r, fresh = true) }
     }
 
+    // A discarded run goes back home, not to the briefing it started from.
+    var wasLive by remember { mutableStateOf(false) }
+    LaunchedEffect(Live.snap.active) { if (wasLive && !Live.snap.active) live = null; wasLive = Live.snap.active }
+
     if (!vm.settings.introSeen || replayIntro) {
         BackHandler(enabled = replayIntro) { replayIntro = false }
         IntroStory { if (!vm.settings.introSeen) vm.updateSettings { it.copy(introSeen = true) }; replayIntro = false }

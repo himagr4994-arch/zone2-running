@@ -143,7 +143,14 @@ private val Track = Color(0x26FFFFFF)
 fun LiveRunning(e: Engine, streets: Boolean = false) {
     val snap = Live.snap
     val view = LocalView.current
-    DisposableEffect(Unit) { view.keepScreenOn = true; onDispose { view.keepScreenOn = false } }
+    val lightTheme = LocalPal.current.bg.red > .5f
+    DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        // The screen is dark in both themes, so the clock and battery icons at the top need to be light.
+        val bars = (view.context as? android.app.Activity)?.window?.let { androidx.core.view.WindowCompat.getInsetsController(it, view) }
+        bars?.isAppearanceLightStatusBars = false
+        onDispose { view.keepScreenOn = false; bars?.isAppearanceLightStatusBars = lightTheme }
+    }
     val state = liveState(snap, e)
     val st = Live.steps.getOrNull(snap.stepIndex)
     val zones = DarkPal.zones

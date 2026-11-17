@@ -142,8 +142,8 @@ adb("shell", "input", "swipe", "500", "1500", "500", "500", "300")
 time.sleep(1)
 tap("Start run", last=True)
 expect("Pause", "on the live run screen")
-for i in range(6):
-    adb("emu", "geo", "fix", str(78.0 + i * 0.0004), "20.0")
+for i in range(10):
+    adb("emu", "geo", "fix", str(78.0 + i * 0.00006), "20.0")      # about 6 m every 2 s: a believable jog
     time.sleep(2)
 alive("during the live run")
 shot("live")

@@ -16,20 +16,21 @@ Never, unless you switch one of these on. Both are off by default.
 | Feature | What is sent | To whom |
 |---|---|---|
 | Weather | The coordinates of the town you typed, a few times a day. The town name once, to look the coordinates up. | Open-Meteo |
+| Street map | Requests for the map squares around a route. The tile server sees which area is being viewed and your internet address. Tiles are cached on the phone. | OpenStreetMap |
 | Update check | A request for the latest release of this app. | GitHub |
 
 No run, heart rate, name or device identifier is included in either request.
 
 ## Location
 
-GPS is used only while a live run is in progress, to measure distance. The app keeps the distance and the time of each kilometre. It does not store or send the route.
+GPS is used while a live run is in progress, and on the screen before it to show signal strength. The route of a live run is stored on the phone with the run and in backups you make. It is never sent anywhere.
 
 ## Permissions
 
 | Permission | Why |
 |---|---|
 | Health Connect: read exercise, heart rate, distance | Import runs recorded by other apps. Read-only. |
-| Health Connect: read speed, steps, calories, elevation gained (optional) | Extra detail on each run page: pace through the run, cadence, calories, climb. Read-only. The app works without them. |
+| Health Connect: read speed, steps, calories, elevation gained, resting heart rate, exercise routes (optional) | Extra detail on each run page: pace through the run, cadence, calories, climb. Read-only. The app works without them. |
 | Location | Measure distance during a live run |
 | Foreground service | Keep a live run going with the screen off |
 | Bluetooth | Connect a heart-rate sensor during a live run (optional) |
@@ -44,4 +45,4 @@ Every permission is asked for at the moment it is needed, and the app keeps work
 
 If the app crashes, the reason is saved to a file on the phone. Nothing is sent. You can copy it from Setup → Help and diagnostics to include in a bug report; it contains the app version, phone model and settings switches, and no runs, heart rates or locations.
 
-Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed CC BY 4.0.
+Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed CC BY 4.0. Map tiles and data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.

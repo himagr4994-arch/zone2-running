@@ -166,12 +166,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 val byId = found.associateBy { it.id }
                 val filled = data.runs.map { old ->
                     val n = byId[old.id] ?: return@map old
-                    if ((old.trace.isEmpty() && n.trace.isNotEmpty()) || (old.pace.isEmpty() && n.pace.isNotEmpty()) || (old.cadence == 0 && n.cadence > 0) || (old.kcal == 0 && n.kcal > 0))
-                        old.copy(trace = n.trace.ifEmpty { old.trace }, pace = n.pace.ifEmpty { old.pace }, zoneSec = n.zoneSec.ifEmpty { old.zoneSec }, splits = old.splits.ifEmpty { n.splits },
+                    if ((old.trace.isEmpty() && n.trace.isNotEmpty()) || (old.pace.isEmpty() && n.pace.isNotEmpty()) || (old.cadence == 0 && n.cadence > 0) || (old.kcal == 0 && n.kcal > 0) || (old.route.isEmpty() && n.route.isNotEmpty()) || (old.splits.isEmpty() && n.splits.isNotEmpty()))
+                        old.copy(route = old.route.ifEmpty { n.route }, trace = n.trace.ifEmpty { old.trace }, pace = n.pace.ifEmpty { old.pace }, zoneSec = n.zoneSec.ifEmpty { old.zoneSec }, splits = old.splits.ifEmpty { n.splits },
                             cadence = maxOf(old.cadence, n.cadence), kcal = maxOf(old.kcal, n.kcal), climb = maxOf(old.climb, n.climb))
                     else old
                 }
                 if (filled != data.runs) commit(data.copy(runs = filled))
+                health.restingHr().takeIf { it > 0 && it != settings.hcRest }?.let { r -> updateSettings { it.copy(hcRest = r) } }
                 if (fresh.isNotEmpty()) {
                     val before = engine()
                     commit(data.copy(runs = data.runs + fresh))
@@ -224,6 +225,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         when (val a = sg.act) {
             is MoveDay -> { updateSettings { it.copy(days = (it.days - a.from + a.to).distinct().sorted(), longDay = if (it.longDay == a.from) a.to else it.longDay) }; toast = "Plan updated" }
             is Remind -> { setReminder(true, a.min); toast = "Reminder set for ${fmtClock(a.min)}" }
+            is SetRest -> { updateSettings { it.copy(restHr = a.hr) }; toast = "Zones rebuilt on a resting rate of ${a.hr}" }
             is SetMax -> { updateSettings { it.copy(maxHr = a.hr) }; toast = "Zones rebuilt on ${a.hr} bpm" }
             is RunWalk -> { updateSettings { it.copy(runWalk = a.on) }; toast = "Plan updated" }
             TalkTest -> {
@@ -237,6 +239,17 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     /** Stores the talk-test ceiling; zones rebuild around it. 0 goes back to the formula. */
     fun setTalk(hr: Int) { updateSettings { it.copy(talkHr = hr) }; toast = if (hr > 0) "Zone 2 now tops out at $hr bpm" else "Zones back on the formula" }
+
+    /** A route the runner just agreed to share from Health Connect, for one imported run. */
+    fun addRoute(run: Run, r: androidx.health.connect.client.records.ExerciseRoute?) {
+        if (r == null) { toast = "No route was shared for this run"; return }
+        viewModelScope.launch {
+            val start = health.startOf(run.id.removePrefix("hc_"))
+            val pts = if (start == null) emptyList() else health.routeOf(r, start)
+            if (pts.isEmpty()) toast = "That run has no usable route"
+            else commit(data.copy(runs = data.runs.map { if (it.id == run.id) it.copy(route = pts) else it }))
+        }
+    }
 
     /** One tap after a run: how it felt, 1 very easy to 5 all out. */
     fun setFeel(id: String, feel: Int) {

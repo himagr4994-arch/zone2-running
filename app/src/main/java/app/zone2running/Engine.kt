@@ -33,7 +33,29 @@ data class Run(
     val steps: List<Step> = emptyList(),    // the guided blocks this run followed, when it was a live run
     val kind: String = "",                  // the session kind it followed: runwalk, 4x4, test…
     val cadence: Int = 0, val kcal: Int = 0, val climb: Int = 0,   // steps per minute, calories, metres climbed; 0 when unknown
+    val route: List<Int> = emptyList(),     // the path, as triples: seconds from the start, latitude × 1e5, longitude × 1e5
 )
+
+/**
+ * Kilometre splits worked out from a pace trace, for runs whose source gave speed but no per-kilometre
+ * distance. The trace is scaled so it adds up to the recorded distance; gaps are filled at the run's average.
+ */
+fun splitsFromPace(pace: List<Int>, trace: List<Int>, distKm: Double): List<Split> {
+    val known = pace.count { it > 0 }
+    if (pace.size < 30 || known * 10 < pace.size * 6 || distKm < 1) return emptyList()
+    val avg = pace.filter { it > 0 }.map { 1000.0 / it }.average()
+    val step = pace.map { (if (it > 0) 1000.0 / it else avg) * TRACE_STEP }
+    val k = distKm * 1000 / step.sum()
+    val out = ArrayList<Split>(); var d = 0.0; var from = 0
+    step.forEachIndexed { i, m ->
+        d += m * k
+        if (d >= (out.size + 1) * 1000.0) {
+            val hr = trace.subList(from.coerceAtMost(trace.size), (i + 1).coerceAtMost(trace.size)).filter { it > 0 }
+            out += Split((i + 1 - from) * TRACE_STEP, if (hr.isEmpty()) 0 else hr.average().roundToInt()); from = i + 1
+        }
+    }
+    return out
+}
 const val TRACE_STEP = 10
 
 /**
@@ -120,6 +142,9 @@ data class Settings(
     val runWalk: Boolean = false,              // easy runs are planned as run-walk (the default for someone just starting)
     val caution: Boolean = false,              // answered yes to a health screening question: no hard sessions are planned
     val hrMeds: Boolean = false,               // on medication that changes heart rate: guidance goes by effort, not bpm
+    val beepsOn: Boolean = true,               // soft tones over the last seconds of a block
+    val mapTiles: Boolean = false,             // street map under the route, fetched from OpenStreetMap; off = route line only, no internet
+    val hcRest: Int = 0,                       // resting heart rate last read from Health Connect, for offering an update
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String, val kind: String = type)
@@ -140,6 +165,7 @@ sealed interface Act
 data class MoveDay(val from: Int, val to: Int) : Act
 data class Remind(val min: Int) : Act
 data class SetMax(val hr: Int) : Act
+data class SetRest(val hr: Int) : Act
 object TalkTest : Act                       // put a talk test on the next easy day
 object EnterTalk : Act                      // the talk test is done: ask for the number
 data class RunWalk(val on: Boolean) : Act
@@ -767,6 +793,8 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             val seen = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 0..365 && it.maxHr in (s.maxHr + 3)..215 && it.durSec >= 600 }.sortedByDescending { it.maxHr }
             val top = seen.getOrNull(1)?.maxHr ?: seen.firstOrNull()?.takeIf { it.avgHr >= it.maxHr * .8 }?.maxHr
             if (top != null && live("max:$top")) out += Suggestion("max:$top", "Raise your max heart rate to $top?", "You've reached $top bpm on a run, above the ${s.maxHr} your zones are built on. Using the real number moves every zone up a little.", "Use $top", SetMax(top))
+            if (s.hcRest in 35..95 && abs(s.hcRest - s.restHr) >= 4 && s.zoneMethod == "hrr" && live("rest:${s.hcRest}"))
+                out += Suggestion("rest:${s.hcRest}", "Update your resting heart rate to ${s.hcRest}?", "Health Connect has it at ${s.hcRest} bpm over the last week; your zones are built on ${s.restHr}. Resting heart rate falls as fitness improves, and the zones should follow.", "Use ${s.hcRest}", SetRest(s.hcRest))
             if (s.talkHr == 0 && runs.size >= 3 && s.overrides.none { (d, k) -> k == "talk" && !d.isBefore(today) } && live("talk"))
                 out += Suggestion("talk", "Check your Zone 2 with a talk test?", "Your zones come from a formula, and for many people formulas miss by ten beats or more. A 35-minute talk test finds your own ceiling.", "Add it to my plan", TalkTest)
         }

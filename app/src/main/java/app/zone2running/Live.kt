@@ -46,7 +46,48 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-data class LiveEvent(val kind: String, val text: String)        // kind: step, km, cap, done
+data class LiveEvent(val kind: String, val text: String)        // kind: step, km, cap, done, warn (spoken heads-up), tick (short buzz), beep (soft tone), half
+
+/**
+ * The tones before a block change: two low, soft notes and a higher one on the change itself.
+ * Each is a sine with a little of its octave for warmth, a gentle start and a long fade, so it reads
+ * as a chime, not an alarm. Music playing underneath is turned down for a moment instead of stopped.
+ */
+object Chime {
+    private const val RATE = 44100
+    private fun tone(hz: Double, ms: Int): ShortArray = ShortArray(RATE * ms / 1000) { i ->
+        val t = i.toDouble() / RATE; val attack = (t / .018).coerceAtMost(1.0); val decay = kotlin.math.exp(-t * (if (ms > 300) 6.5 else 11.0))
+        ((kotlin.math.sin(2 * Math.PI * hz * t) + .22 * kotlin.math.sin(4 * Math.PI * hz * t)) * attack * decay * .30 * Short.MAX_VALUE).toInt().toShort()
+    }
+    private val low by lazy { tone(587.33, 260) }       // D5
+    private val top by lazy { tone(880.0, 620) }        // A5
+    private var focus: android.media.AudioFocusRequest? = null
+    private val attrs = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+
+    fun play(ctx: Context, high: Boolean) {
+        try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            if (focus == null) focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs).build().also { am.requestAudioFocus(it) }
+            val pcm = if (high) top else low
+            val track = android.media.AudioTrack.Builder().setAudioAttributes(attrs)
+                .setAudioFormat(android.media.AudioFormat.Builder().setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setSampleRate(RATE).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+                .setTransferMode(android.media.AudioTrack.MODE_STATIC).setBufferSizeInBytes(pcm.size * 2).build()
+            track.write(pcm, 0, pcm.size)
+            track.setNotificationMarkerPosition(pcm.size - 1)
+            track.setPlaybackPositionUpdateListener(object : android.media.AudioTrack.OnPlaybackPositionUpdateListener {
+                override fun onMarkerReached(t: android.media.AudioTrack) { try { t.release() } catch (e: Exception) { } }
+                override fun onPeriodicNotification(t: android.media.AudioTrack) {}
+            })
+            track.play()
+        } catch (e: Exception) { }
+    }
+    /** Hands the music its volume back. */
+    fun done(ctx: Context) {
+        try { focus?.let { (ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).abandonAudioFocusRequest(it) } } catch (e: Exception) { }
+        focus = null
+    }
+}
 
 fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val p = Math.PI / 180
@@ -77,6 +118,11 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
     /** The whole run on the TRACE_STEP grid, kept with the saved run: heart rate, and pace over the last half minute. */
     val hrLog = ArrayList<Int>(); val paceLog = ArrayList<Int>()
     private val dist = ArrayList<Double>()
+    /** The path: seconds, latitude × 1e5, longitude × 1e5. One point every four seconds is plenty to draw. */
+    val route = ArrayList<Int>(); private var lastRouteSec = -99
+    /** How sure the phone is of its position, in metres; -1 before the first fix. */
+    var acc = -1
+    private val total = if (steps.isNotEmpty() && steps.all { it.sec > 0 }) steps.sumOf { it.sec } else 0
 
     fun zoneOf(h: Int): Int { var z = 1; for (i in 1..4) if (h >= zb[i]) z++; return z }
     val step: Step? get() = steps.getOrNull(stepIndex)
@@ -107,9 +153,17 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
         if (cur != null && cur.sec > 0 && stepElapsed >= cur.sec) {
             stepIndex++; stepElapsed = 0
             val nx = step
+            val lastRep = nx != null && Regex("rep (\\d+) of (\\d+)").find(nx.label)?.let { it.groupValues[1] == it.groupValues[2] && it.groupValues[2] != "1" } == true
             out += if (nx == null) LiveEvent("done", "Session complete. Keep going or finish when you're ready.")
-            else LiveEvent("step", nx.label + (if (nx.sec >= 60) ", ${nx.sec / 60} minute${if (nx.sec / 60 == 1) "" else "s"}" else if (nx.sec > 0) ", ${nx.sec} seconds" else "") + ".")
+            else LiveEvent("step", nx.label + (if (nx.sec >= 60) ", ${nx.sec / 60} minute${if (nx.sec / 60 == 1) "" else "s"}" else if (nx.sec > 0) ", ${nx.sec} seconds" else "") + "." + if (lastRep) " Last one." else "")
+        } else if (cur != null && cur.sec >= 30) {
+            // The run-up to a change: a spoken warning before a hard rep, a nudge before a walk break, two soft tones at the very end.
+            val left = cur.sec - stepElapsed; val nx = next
+            if (left == 10 && nx?.kind == "hard" && cur.sec >= 60) out += LiveEvent("warn", "Hard rep in 10 seconds.")
+            if (left == 5 && nx != null && (nx.kind == "walk" || cur.kind == "walk")) out += LiveEvent("tick", "")
+            if (left == 2 || left == 1) out += LiveEvent("beep", "")
         }
+        if (total >= 1200 && elapsed == total / 2) out += LiveEvent("half", "Halfway.")
         // On easy blocks, twenty seconds above the Zone 2 cap earns one cue a minute.
         val easyBlock = (step ?: steps.lastOrNull())?.let { it.zHi <= 2 } ?: true
         if (easyBlock && hrNow >= zb[2]) overCap++ else overCap = 0
@@ -119,7 +173,9 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
 
     /** A GPS fix. Poor or impossible ones are dropped. Returns an event when a kilometre completes. */
     fun fix(lat: Double, lon: Double, accuracyM: Float, timeMs: Long): LiveEvent? {
+        acc = accuracyM.roundToInt()
         if (accuracyM > 30f) return null
+        if (elapsed - lastRouteSec >= 4) { route += elapsed; route += (lat * 1e5).roundToInt(); route += (lon * 1e5).roundToInt(); lastRouteSec = elapsed }
         if (lastLat.isNaN()) { lastLat = lat; lastLon = lon; lastFixMs = timeMs; return null }
         val d = haversine(lastLat, lastLon, lat, lon); val dt = (timeMs - lastFixMs) / 1000.0
         if (dt <= 0 || d < 2.0) return null                           // standing still, or jitter
@@ -140,7 +196,7 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
     fun toRun(date: LocalDate, type: String, startMin: Int, kind: String = "") = Run(
         "live_${date.toString().replace("-", "")}_${System.currentTimeMillis().toString(36)}", date, type, (meters / 10).roundToInt() / 100.0, elapsed,
         avgHr, hrMax, source = "live", zoneSec = if (hrN >= 30) zoneSec.toList() else emptyList(), startMin = startMin, splits = splits.toList(),
-        trace = if (hrN >= 30) hrLog.toList() else emptyList(), pace = if (meters >= 200) paceLog.toList() else emptyList(), steps = steps, kind = kind,
+        trace = if (hrN >= 30) hrLog.toList() else emptyList(), pace = if (meters >= 200) paceLog.toList() else emptyList(), steps = steps, kind = kind, route = if (route.size >= 30) route.toList() else emptyList(),
     )
 }
 
@@ -148,7 +204,7 @@ data class LiveSnap(
     val active: Boolean = false, val paused: Boolean = false, val elapsed: Int = 0, val meters: Double = 0.0, val hr: Int = 0, val zone: Int = 0,
     val stepIndex: Int = 0, val stepLabel: String = "", val stepLeft: Int = 0, val stepKind: String = "", val nextLabel: String = "", val pace: Double? = null,
     val gps: String = "Looking for GPS", val sensor: String = "", val splits: List<Split> = emptyList(), val avgHr: Int = 0, val lastCue: String = "",
-    val trace: List<Int> = emptyList(),
+    val trace: List<Int> = emptyList(), val acc: Int = -1, val route: List<Int> = emptyList(),
 )
 
 /** The bridge between the run service and the screen. */
@@ -156,11 +212,11 @@ object Live {
     var snap by mutableStateOf(LiveSnap())
     var result by mutableStateOf<Run?>(null)
     var steps: List<Step> = emptyList(); var zb: List<Int> = listOf(0, 0, 0, 0, 0); var type = "easy"; var kind = ""
-    var sensorAddr = ""; var voice = true
+    var sensorAddr = ""; var voice = true; var beeps = true
     internal var service: RunService? = null
 
-    fun start(ctx: Context, steps: List<Step>, zb: List<Int>, type: String, sensorAddr: String, voice: Boolean, kind: String = "") {
-        this.kind = kind; this.steps = steps; this.zb = zb; this.type = type; this.sensorAddr = sensorAddr; this.voice = voice; result = null
+    fun start(ctx: Context, steps: List<Step>, zb: List<Int>, type: String, sensorAddr: String, voice: Boolean, kind: String = "", beeps: Boolean = true) {
+        this.beeps = beeps; this.kind = kind; this.steps = steps; this.zb = zb; this.type = type; this.sensorAddr = sensorAddr; this.voice = voice; result = null
         snap = LiveSnap(active = true, stepLabel = steps.firstOrNull()?.label ?: "", sensor = if (sensorAddr.isEmpty()) "" else "Connecting")
         val i = Intent(ctx, RunService::class.java)
         if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
@@ -256,6 +312,7 @@ class RunService : Service() {
     private val locListener = LocationListener { loc: Location ->
         lastFixAt = System.currentTimeMillis()
         gpsState = if (loc.accuracy <= 30f) "GPS locked" else "Weak GPS"
+        tracker.acc = loc.accuracy.roundToInt()
         if (!paused) tracker.fix(loc.latitude, loc.longitude, loc.accuracy, loc.time)?.let { cue(it) }
     }
 
@@ -293,19 +350,24 @@ class RunService : Service() {
     }
 
     private fun cue(e: LiveEvent) {
-        lastCue = e.text
+        if (e.text.isNotEmpty()) lastCue = e.text
         try {
             val vib = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            val pattern = if (e.kind == "cap") longArrayOf(0, 250, 150, 250) else longArrayOf(0, 400)
-            vib?.vibrate(VibrationEffect.createWaveform(pattern, -1))
-            if (Live.voice && ttsReady) tts?.speak(e.text, TextToSpeech.QUEUE_ADD, null, "cue${tracker.elapsed}")
+            val pattern = when (e.kind) { "cap" -> longArrayOf(0, 250, 150, 250); "beep", "half" -> null; "tick", "warn" -> longArrayOf(0, 140); else -> longArrayOf(0, 400) }
+            if (pattern != null) vib?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            if (Live.beeps && (e.kind == "beep" || e.kind == "step" || e.kind == "done")) {
+                Chime.play(this, high = e.kind != "beep")
+                handler.removeCallbacks(quiet); handler.postDelayed(quiet, 2500)
+            }
+            if (Live.voice && ttsReady && e.text.isNotEmpty()) tts?.speak(e.text, TextToSpeech.QUEUE_ADD, null, "cue${tracker.elapsed}")
         } catch (ex: Exception) { }
     }
+    private val quiet = Runnable { Chime.done(this) }
 
     private fun publish() {
         val st = tracker.step
         Live.snap = LiveSnap(true, paused, tracker.elapsed, tracker.meters, tracker.hr, if (tracker.hr > 0) tracker.zoneOf(tracker.hr) else 0, tracker.stepIndex,
-            st?.label ?: "Free running", tracker.stepLeft, st?.kind ?: "", tracker.next?.label ?: "", tracker.paceNow(), gpsState, sensor?.status ?: "", tracker.splits.toList(), tracker.avgHr, lastCue, tracker.trace.toList())
+            st?.label ?: "Free running", tracker.stepLeft, st?.kind ?: "", tracker.next?.label ?: "", tracker.paceNow(), gpsState, sensor?.status ?: "", tracker.splits.toList(), tracker.avgHr, lastCue, tracker.trace.toList(), tracker.acc, tracker.route.toList())
     }
 
     private fun notification(): Notification {

@@ -93,14 +93,15 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
             }
             Panel {
                 Head("When the app goes online", 20)
-                Body("Never, unless you switch one of these on. Both are off by default.")
+                Body("Never, unless you switch one of these on. All are off by default.")
+                Body("Street map: asks OpenStreetMap's tile server for the map squares around your route. That server sees which area you are looking at, and your internet address.")
                 Body("Weather: sends the coordinates of the town you typed to Open-Meteo, a few times a day.")
                 Body("Update check: asks GitHub for the latest release of this app.")
                 Small("No run, heart rate, name or device identifier is included in either request.", p.ink)
             }
             Panel {
                 Head("Location", 20)
-                Body("GPS is used only while a live run is in progress, to measure distance. The app keeps the distance and the time of each kilometre. The route is not stored or sent.")
+                Body("GPS is used while a live run is in progress, and on the screen before it to show signal strength. The route of a live run is saved on the phone with the run, and in backups you make. It is never sent anywhere.")
             }
             Panel {
                 Head("Permissions", 20)
@@ -123,7 +124,7 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
             }
             Panel {
                 Head("Credits", 20)
-                listOf("Barlow and Barlow Condensed" to "Typefaces by Jeremy Tribby, SIL Open Font License 1.1.", "Open-Meteo" to "Weather data by Open-Meteo.com, CC BY 4.0.",
+                listOf("Barlow and Barlow Condensed" to "Typefaces by Jeremy Tribby, SIL Open Font License 1.1.", "Open-Meteo" to "Weather data by Open-Meteo.com, CC BY 4.0.", "OpenStreetMap" to "Map tiles and data © OpenStreetMap contributors, ODbL.",
                     "Jetpack Compose and AndroidX" to "Android libraries by Google, Apache License 2.0.").forEach { (a, b) ->
                     Column { Text(a, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink); Small(b) }
                 }

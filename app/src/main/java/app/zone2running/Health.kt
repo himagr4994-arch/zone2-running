@@ -7,6 +7,9 @@ import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.ElevationGainedRecord
+import androidx.health.connect.client.records.ExerciseRoute
+import androidx.health.connect.client.records.ExerciseRouteResult
+import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
@@ -31,7 +34,14 @@ class Health(private val ctx: Context) {
         HealthPermission.getReadPermission(StepsRecord::class),
         HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
         HealthPermission.getReadPermission(ElevationGainedRecord::class),
+        HealthPermission.getReadPermission(RestingHeartRateRecord::class),
     )
+
+    /** Average resting heart rate over the last week, or 0 when nothing has been recorded or it isn't allowed. */
+    suspend fun restingHr(): Int = try {
+        val v = client.readRecords(ReadRecordsRequest(RestingHeartRateRecord::class, TimeRangeFilter.after(Instant.now().minus(Duration.ofDays(7))))).records.map { it.beatsPerMinute }
+        if (v.size >= 2) v.average().roundToInt() else 0
+    } catch (e: Exception) { 0 }
     suspend fun extrasGranted(): Boolean = available() && client.permissionController.getGrantedPermissions().containsAll(extras)
     private val runTypes = setOf(ExerciseSessionRecord.EXERCISE_TYPE_RUNNING, ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL)
     private val client by lazy { HealthConnectClient.getOrCreate(ctx) }
@@ -78,12 +88,21 @@ class Health(private val ctx: Context) {
                 val steps = try { client.aggregate(AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), range, setOf(origin)))[StepsRecord.COUNT_TOTAL] ?: 0L } catch (e: Exception) { 0L }
                 val kcal = try { client.aggregate(AggregateRequest(setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL), range, setOf(origin)))[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories ?: 0.0 } catch (e: Exception) { 0.0 }
                 val climb = try { client.aggregate(AggregateRequest(setOf(ElevationGainedRecord.ELEVATION_GAINED_TOTAL), range, setOf(origin)))[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters ?: 0.0 } catch (e: Exception) { 0.0 }
+                // The path, when the recording app saved one and the runner has allowed routes to be read.
+                val route = (sx.exerciseRouteResult as? ExerciseRouteResult.Data)?.let { routeOf(it.exerciseRoute, sx.startTime) } ?: emptyList()
+                // Laps of about a kilometre are splits in all but name.
+                val lapSplits = sx.laps.takeIf { l -> l.size >= 2 && l.dropLast(1).all { (it.length?.inMeters ?: 0.0) in 950.0..1050.0 } }?.dropLast(1)?.map { lap ->
+                    val a = Duration.between(sx.startTime, lap.startTime).seconds; val b = Duration.between(sx.startTime, lap.endTime).seconds
+                    val hr = beats.filter { it.first in a..b }.map { it.second }
+                    Split((b - a).toInt(), if (hr.isEmpty()) 0 else hr.average().roundToInt())
+                } ?: emptyList()
                 val cadence = (steps * 60.0 / dur).roundToInt().takeIf { it in 120..230 } ?: 0      // anything else is not a running step count
                 out += Run(
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
                     distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
                     notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
-                    splits = splits(range, sx.metadata.dataOrigin, sx.startTime),
+                    splits = splits(range, sx.metadata.dataOrigin, sx.startTime).ifEmpty { lapSplits }.ifEmpty { splitsFromPace(paceGrid, traceFrom(beats, dur), km) },
+                    route = route,
                     startMin = sx.startTime.atOffset(offset).toLocalTime().let { it.hour * 60 + it.minute },
                     trace = traceFrom(beats, dur), pace = paceGrid, cadence = cadence, kcal = kcal.roundToInt(), climb = climb.roundToInt(),
                 )
@@ -92,6 +111,20 @@ class Health(private val ctx: Context) {
         } while (token != null)
         return out
     }
+
+    /** A Health Connect route as the app stores it: seconds from the start, latitude and longitude × 1e5, thinned to one point every four seconds. */
+    fun routeOf(r: ExerciseRoute, start: Instant): List<Int> {
+        val out = ArrayList<Int>(); var last = -99L
+        for (l in r.route.sortedBy { it.time }) {
+            val t = Duration.between(start, l.time).seconds
+            if (t - last < 4) continue
+            out += t.toInt().coerceAtLeast(0); out += (l.latitude * 1e5).roundToInt(); out += (l.longitude * 1e5).roundToInt(); last = t
+        }
+        return if (out.size >= 30) out else emptyList()
+    }
+
+    /** When a run started, for lining a route up with it. Null when the run can no longer be found. */
+    suspend fun startOf(id: String): Instant? = try { client.readRecord(ExerciseSessionRecord::class, id).record.startTime } catch (e: Exception) { null }
 
     /** Per-kilometre splits, when the recording app wrote distance in small enough pieces to work them out. */
     private suspend fun splits(range: TimeRangeFilter, origin: androidx.health.connect.client.records.metadata.DataOrigin, start: Instant): List<Split> = try {

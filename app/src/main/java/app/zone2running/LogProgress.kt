@@ -80,7 +80,7 @@ fun LogScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (FormSeed)
 
 /** One run, shown rather than edited: the pace, where the heart rate sat, the splits, and what it says about Zone 2. */
 @Composable
-fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, close: () -> Unit) {
+fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: Boolean = false, addRoute: ((androidx.health.connect.client.records.ExerciseRoute?) -> Unit)? = null, close: () -> Unit) {
     val p = LocalPal.current
     val z = if (r.avgHr > 0) e.zoneOf(r.avgHr) else 0
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -109,6 +109,16 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, close: () 
     Text(d.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 30.sp, color = p.ink)
 
     if (r.trace.count { it > 0 } >= 30) RunCharts(e, r, d)
+
+    if (r.route.size >= 6) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Label("Route")
+        RouteMap(r.route, r.trace, e, streets, Modifier.fillMaxWidth().height(260.dp), kmSecs(r.splits))
+        Small(if (r.trace.any { it > 0 }) "The line is coloured by heart-rate zone. Numbers mark each ${U.word}." else "Numbers mark each ${U.word}.")
+    } else if (r.source == "health" && addRoute != null) {
+        // Health Connect hands over a route one run at a time, and only with a yes from the runner.
+        val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.health.connect.client.contracts.ExerciseRouteRequestContract()) { addRoute(it) }
+        Link("road", "Add the route", "Ask Health Connect for this run's map, if the app that recorded it saved one") { try { ask.launch(r.id.removePrefix("hc_")) } catch (x: Exception) { addRoute(null) } }
+    }
 
     if (d.blocks.size > 1) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Label("Block by block")

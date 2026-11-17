@@ -19,8 +19,8 @@ android {
         applicationId = "app.zone2running"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.8.0"
+        versionCode = 11
+        versionName = "0.9.0"
         // "owner/repository" on GitHub. Leave empty to hide the update check.
         buildConfigField("String", "UPDATE_REPO", "\"\"")
     }

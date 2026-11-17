@@ -501,4 +501,57 @@ class EngineTest {
         assertTrue(d.planned); assertEquals(16, d.blocks.size)
         assertTrue(Engine(s.copy(planStart = today), listOf(r.copy(date = today.plusDays(1))), today).debrief(r.copy(date = today.plusDays(1))).blocks.isEmpty())
     }
+
+    // ---- 0.9: cues, route, splits from pace ----
+
+    @Test fun cuesWarnBeforeAHardRepAndBeepIntoEveryChange() {
+        val e = Engine(s, emptyList(), today)
+        val tr = RunTracker(e.steps(Session("intervals", "4 × 4 min hard", 50, "", "4x4")), e.zb)
+        val log = HashMap<Int, List<LiveEvent>>()
+        repeat(1500) { val ev = tr.tick(150); if (ev.isNotEmpty()) log[tr.elapsed] = ev }
+        assertEquals("Hard rep in 10 seconds.", log[590]!!.single { it.kind == "warn" }.text)
+        assertEquals(listOf("beep"), log[598]!!.map { it.kind }); assertEquals(listOf("beep"), log[599]!!.map { it.kind })
+        assertTrue(log[600]!!.single { it.kind == "step" }.text.startsWith("Hard, rep 1 of 4"))
+        assertNull(log[830])                                             // no spoken warning before an easy jog, only the tones
+        assertEquals("beep", log[838]!!.single().kind)
+        // The last rep is announced as such, and halfway is called once.
+        val all = log.values.flatten()
+        assertTrue(RunTracker(e.steps(Session("intervals", "", 50, "", "4x4")), e.zb).let { t2 -> (1..2300).flatMap { t2.tick(150) } }.any { it.text.endsWith("Last one.") })
+        assertEquals(1, RunTracker(e.steps(Session("easy", "", 40, "")), e.zb).let { t3 -> (1..2400).flatMap { t3.tick(140) } }.count { it.kind == "half" })
+        assertTrue(all.none { it.kind == "tick" })
+    }
+
+    @Test fun runWalkGetsAQuietNudgeBeforeEachSwitch() {
+        val e = Engine(s, emptyList(), today)
+        val tr = RunTracker(e.steps(Session("easy", "", 30, "", "runwalk")), e.zb)
+        val log = HashMap<Int, List<LiveEvent>>()
+        repeat(600) { val ev = tr.tick(140); if (ev.isNotEmpty()) log[tr.elapsed] = ev }
+        assertEquals("tick", log[235]!!.single().kind); assertEquals("", log[235]!!.single().text)       // before the walk
+        assertEquals("tick", log[295]!!.single().kind)                                                   // and before the jog
+        assertTrue(log.values.flatten().none { it.kind == "warn" })
+    }
+
+    @Test fun liveRunKeepsItsRouteAndAccuracy() {
+        val tr = RunTracker(emptyList(), listOf(124, 137, 150, 162, 175))
+        assertEquals(-1, tr.acc)
+        for (i in 0 until 300) { tr.tick(140); tr.fix(20.0 + i * 0.00003, 78.0, if (i == 50) 60f else 6f, i * 1000L) }
+        assertEquals(6, tr.acc)
+        assertTrue(tr.route.size % 3 == 0); assertTrue(tr.route.size / 3 in 60..80)       // one point every four seconds
+        val r = tr.toRun(today, "easy", 600)
+        assertEquals(tr.route.toList(), r.route); assertTrue(r.distKm > 0.9)
+        assertEquals(2000000, r.route[1]); assertEquals(7800000, r.route[2])
+    }
+
+    @Test fun splitsCanBeWorkedOutFromAPaceTrace() {
+        val pace = List(180) { 360 } + List(180) { 480 }                 // 30 min at 6:00 then 30 min at 8:00: 5 km + 3.75 km
+        val sp = splitsFromPace(pace, List(360) { if (it < 180) 160 else 140 }, 8.75)
+        assertEquals(8, sp.size); assertEquals(360, sp[0].sec); assertEquals(160, sp[0].hr); assertEquals(480, sp[7].sec); assertEquals(140, sp[7].hr)
+        assertTrue(splitsFromPace(List(360) { if (it % 3 == 0) 400 else 0 }, emptyList(), 8.0).isEmpty())     // too patchy to trust
+    }
+
+    @Test fun offersRestingHeartRateFromHealthConnect() {
+        val sg = Engine(s.copy(hcRest = 54, snoozed = mapOf("talk" to today)), listOf(tenK), today).suggestions()
+        assertEquals(SetRest(54), sg.single().act)
+        assertTrue(Engine(s.copy(hcRest = 58, snoozed = mapOf("talk" to today)), listOf(tenK), today).suggestions().isEmpty())     // two beats is not worth a question
+    }
 }

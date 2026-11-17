@@ -103,7 +103,7 @@ fun App(vm: AppVM) {
         Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
             when {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
-                Live.snap.active && reward == null && form == null -> LiveRunning(e)
+                Live.snap.active && reward == null && form == null -> LiveRunning(e, vm.settings.mapTiles)
                 running && reward == null && form == null -> Page(arrive = true) { LiveScreen(vm, e, live) { live = null } }
                 reward != null -> Box {
                     Page(arrive = true) { RewardScreen(reward, feel = vm.data.runs.firstOrNull { it.id == reward.run.id }?.feel ?: 0, rate = { vm.setFeel(reward.run.id, it) }, share = { vm.shareRun(reward) }) { vm.celebration = null; go(0) } }
@@ -111,7 +111,7 @@ fun App(vm: AppVM) {
                 }
                 form != null -> Page(arrive = true) { RunForm(vm, e, form!!) { form = null } }
                 lesson != null -> Page(arrive = true) { LessonScreen(lesson!!, already = lesson!!.id in vm.settings.lessonsDone, close = { lesson = null }) { vm.finishLesson(lesson!!.id); lesson = null } }
-                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }) { runId = null } }
+                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }, streets = vm.settings.mapTiles, addRoute = { vm.addRoute(run, it) }) { runId = null } }
                 more != null -> key(more) {
                     Page(arrive = true) { MoreScreen(vm, e, more!!, go = { more = it }, openLesson = { lesson = it }, replayIntro = { more = null; replayIntro = true }, rerunGuide = { more = null; rerunGuide = true }) }
                 }

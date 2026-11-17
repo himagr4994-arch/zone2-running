@@ -29,14 +29,14 @@ object Json {
             .put("weatherOn", s.weatherOn).put("city", s.city).put("lat", s.lat).put("lon", s.lon)
             .put("voiceOn", s.voiceOn).put("sensorAddr", s.sensorAddr).put("sensorName", s.sensorName)
             .put("updateCheck", s.updateCheck).put("disclaimerOk", s.disclaimerOk).put("seenPace", s.seenPace)
-            .put("talkHr", s.talkHr).put("runWalk", s.runWalk).put("caution", s.caution).put("hrMeds", s.hrMeds)
+            .put("beepsOn", s.beepsOn).put("mapTiles", s.mapTiles).put("hcRest", s.hcRest).put("talkHr", s.talkHr).put("runWalk", s.runWalk).put("caution", s.caution).put("hrMeds", s.hrMeds)
         val ra = JSONArray()
         for (r in d.runs) ra.put(
             JSONObject().put("id", r.id).put("date", r.date.toString()).put("type", r.type).put("distKm", r.distKm)
                 .put("durSec", r.durSec).put("avgHr", r.avgHr).put("maxHr", r.maxHr).put("feel", r.feel)
                 .put("notes", r.notes).put("source", r.source).put("zoneSec", JSONArray(r.zoneSec)).put("startMin", r.startMin)
                 .put("splits", JSONArray(r.splits.flatMap { listOf(it.sec, it.hr) })).put("heatPct", r.heatPct)
-                .put("trace", JSONArray(r.trace)).put("pace", JSONArray(r.pace)).put("kind", r.kind).put("cadence", r.cadence).put("kcal", r.kcal).put("climb", r.climb)
+                .put("route", JSONArray(r.route)).put("trace", JSONArray(r.trace)).put("pace", JSONArray(r.pace)).put("kind", r.kind).put("cadence", r.cadence).put("kcal", r.kcal).put("climb", r.climb)
                 .put("steps", JSONArray().also { a -> r.steps.forEach { a.put(JSONObject().put("label", it.label).put("sec", it.sec).put("zLo", it.zLo).put("zHi", it.zHi).put("kind", it.kind)) } })
         )
         return JSONObject().put("app", "zone2-running").put("version", 1).put("settings", so).put("runs", ra)
@@ -67,7 +67,7 @@ object Json {
             overrides = so.optJSONObject("overrides")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(k)?.let { it to o.optString(k) } }.toMap() } ?: emptyMap(),
             weatherOn = so.optBoolean("weatherOn", false), city = so.optString("city"), lat = so.optDouble("lat", 0.0), lon = so.optDouble("lon", 0.0),
             voiceOn = so.optBoolean("voiceOn", true), sensorAddr = so.optString("sensorAddr"), sensorName = so.optString("sensorName"),
-            seenPace = so.optInt("seenPace", 0), talkHr = so.optInt("talkHr", 0), runWalk = so.optBoolean("runWalk", false), caution = so.optBoolean("caution", false), hrMeds = so.optBoolean("hrMeds", false), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
+            seenPace = so.optInt("seenPace", 0), talkHr = so.optInt("talkHr", 0), beepsOn = so.optBoolean("beepsOn", true), mapTiles = so.optBoolean("mapTiles", false), hcRest = so.optInt("hcRest", 0), runWalk = so.optBoolean("runWalk", false), caution = so.optBoolean("caution", false), hrMeds = so.optBoolean("hrMeds", false), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
             snoozed = so.optJSONObject("snoozed")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(o.optString(k))?.let { k to it } }.toMap() } ?: emptyMap(),
         )
         val ra = o.optJSONArray("runs") ?: JSONArray()
@@ -81,7 +81,7 @@ object Json {
                 ints(r.optJSONArray("splits"), emptyList()).chunked(2).filter { it.size == 2 }.map { Split(it[0], it[1]) }, r.optDouble("heatPct", 0.0),
                 ints(r.optJSONArray("trace"), emptyList()), ints(r.optJSONArray("pace"), emptyList()),
                 r.optJSONArray("steps")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Step(it.optString("label"), it.optInt("sec"), it.optInt("zLo", 1), it.optInt("zHi", 2), it.optString("kind")) } } ?: emptyList(),
-                r.optString("kind"), r.optInt("cadence", 0), r.optInt("kcal", 0), r.optInt("climb", 0))
+                r.optString("kind"), r.optInt("cadence", 0), r.optInt("kcal", 0), r.optInt("climb", 0), ints(r.optJSONArray("route"), emptyList()))
         }
         val ha = o.optJSONArray("hidden") ?: JSONArray()
         return AppData(s, runs, (0 until ha.length()).map { ha.getString(it) }.toSet())

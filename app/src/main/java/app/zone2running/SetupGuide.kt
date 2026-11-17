@@ -137,7 +137,10 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
 
     Panel {
         Head("Live run")
-        Toggle("Spoken cues", "Block changes, each kilometre, and a nudge when you leave Zone 2. Vibration stays on either way.", s.voiceOn) { v -> vm.updateSettings { it.copy(voiceOn = v) } }
+        Toggle("Spoken cues", "Block changes, a 10-second warning before each hard rep, each kilometre, and a nudge when you leave Zone 2. Vibration stays on either way.", s.voiceOn) { v -> vm.updateSettings { it.copy(voiceOn = v) } }
+        Toggle("Soft tones", "Two low notes over the last two seconds of a block and a higher one on the change. Music is turned down for a moment, not stopped.", s.beepsOn) { v -> vm.updateSettings { it.copy(beepsOn = v) } }
+        Toggle("Street map under the route", "Off: your route is drawn as a line and nothing is fetched. On: street tiles come from OpenStreetMap, which sees the area you are in. Tiles are kept on the phone after the first download.", s.mapTiles) { v -> vm.updateSettings { it.copy(mapTiles = v) } }
+        Small("The route of a live run is saved on this phone with the run and is included in your backups. It is never sent anywhere.")
         if (s.sensorAddr.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
             Body("Sensor: ${s.sensorName.ifBlank { "saved" }}", modifier = Modifier.weight(1f))
             Btn("Forget", ghost = true, small = true) { vm.updateSettings { it.copy(sensorAddr = "", sensorName = "") } }
@@ -174,9 +177,9 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
                 Btn("Connect Health Connect") { ask.launch(vm.health.permissions + vm.health.extras) }
             }
             else -> {
-                NoteBox(Note("good", "Connected. Zone 2 Running reads runs, distance and heart rate" + if (vm.healthExtras) ", plus pace, steps, calories and climb." else "."))
+                NoteBox(Note("good", "Connected. Zone 2 Running reads runs, distance and heart rate" + if (vm.healthExtras) ", plus pace, steps, calories, climb and resting heart rate." else "."))
                 if (!vm.healthExtras) {
-                    Small("Allow four more and each run page gets richer: pace through the run, cadence, calories and climb. Still read-only, still on your phone.")
+                    Small("Allow five more and each run page gets richer: pace through the run, cadence, calories, climb, and your resting heart rate to keep the zones current. Still read-only, still on your phone. Routes are asked for one run at a time, from the run's own page.")
                     Btn("Allow more run detail", small = true) { ask.launch(vm.health.permissions + vm.health.extras) }
                 }
                 Toggle("Import new runs automatically", "Checks each time you open the app.", s.autoImport) { v -> vm.updateSettings { it.copy(autoImport = v) } }

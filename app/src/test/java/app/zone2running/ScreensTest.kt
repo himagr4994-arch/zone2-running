@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertEquals
@@ -301,5 +303,37 @@ class ScreensTest {
         open = b; rule.waitForIdle(); shot("run-rich-intervals")
         open = c; rule.waitForIdle(); shot("run-rich-imported")
         rule.onNodeWithText("A hard effort").assertExists()
+    }
+
+    /** A made-up loop of about 5 km, as the app stores a route. */
+    private fun loop(points: Int = 400, secs: Int = 2400) = (0 until points).flatMap { i ->
+        val a = 2 * Math.PI * i / points
+        listOf(secs * i / points, ((20.0 + .0062 * kotlin.math.sin(a) + .0015 * kotlin.math.sin(3 * a)) * 1e5).toInt(), ((78.0 + .0085 * kotlin.math.cos(a) + .002 * kotlin.math.sin(2 * a)) * 1e5).toInt())
+    }
+
+    @Test @Config(qualifiers = "w412dp-h892dp-xhdpi") fun liveMapAndGpsMeter() {
+        val vm = seeded()
+        val e = vm.engine()
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Start run").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("GPS SIGNAL").assertExists(); shot("live-briefing-gps")
+        Live.type = "easy"; Live.steps = e.steps(Session("easy", "Easy run", 45, ""))
+        Live.snap = LiveSnap(true, false, 1325, 2740.0, 144, 2, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "Connected",
+            listOf(Split(492, 141), Split(478, 146)), 142, "", List(120) { 141 + (3 * kotlin.math.sin(it / 4.0)).toInt() }, 6, loop().take(3 * 220))
+        rule.waitForIdle()
+        rule.onNodeWithText("GPS ±6 m").assertExists()
+        rule.onNodeWithText("In Zone 2").performTouchInput { swipeLeft() }; rule.waitForIdle()
+        rule.onNodeWithText("  swipe for the dial").assertExists(); shot("live-6-route")
+        Live.snap = LiveSnap(); Live.steps = emptyList(); rule.waitForIdle()
+    }
+
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun runPageWithRoute() {
+        val vm = seeded()
+        val r = Run("rich-map", today, "easy", 4.9, 2400, 141, 153, source = "live", route = loop(),
+            trace = List(240) { 128 + it / 12 + (4 * kotlin.math.sin(it / 6.0)).toInt() }, zoneSec = listOf(300, 1700, 400, 0, 0),
+            splits = listOf(Split(492, 138), Split(488, 142), Split(495, 146), Split(486, 149)))
+        vm.saveRun(r, isNew = false)
+        rule.setContent { AppTheme { androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().background(LocalPal.current.bg).padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp)) { RunPage(vm.engine(), r, rate = {}, edit = {}) {} } } }
+        rule.waitForIdle(); rule.onNodeWithText("ROUTE").assertExists(); shot("run-rich-route")
     }
 }

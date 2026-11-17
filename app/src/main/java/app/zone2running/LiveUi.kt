@@ -43,7 +43,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
     val scanner = remember { HeartSensor(ctx) }
     DisposableEffect(Unit) { onDispose { scanner.stopScan() } }
 
-    fun begin() = Live.start(ctx, steps, e.zb, session.type, vm.settings.sensorAddr, vm.settings.voiceOn, session.kind)
+    fun begin() = Live.start(ctx, steps, e.zb, session.type, vm.settings.sensorAddr, vm.settings.voiceOn, session.kind, vm.settings.beepsOn)
     val askStart = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
         if (got[Manifest.permission.ACCESS_FINE_LOCATION] == true) begin()
         else note = "Location is needed to measure distance during the run. Without it you can still log the run by hand afterwards."
@@ -70,6 +70,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
         if (steps.size > 8) Small("…and ${steps.size - 8} more blocks.")
         if (steps.any { it.kind == "hard" || it.kind == "race" }) Small(STOP_SIGNS)
     }
+    GpsMeter()
     Panel {
         Label("Heart rate sensor")
         if (vm.settings.sensorAddr.isNotEmpty()) {
@@ -90,7 +91,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
         }
     }
     if (note.isNotEmpty()) NoteBox(Note("warn", note))
-    Small("Your phone measures distance with GPS while the run is on. The route itself is never stored, only distance and per-kilometre times.")
+    Small("Your phone measures distance with GPS while the run is on. The route is saved on this phone with the run and never sent anywhere.")
     Row {
         Btn("Back", ghost = true, onClick = close)
         Spacer(Modifier.weight(1f))
@@ -139,7 +140,7 @@ private val Track = Color(0x26FFFFFF)
  * the screen's colour says whether that is fine, and everything under it is glanceable at arm's length.
  */
 @Composable
-fun LiveRunning(e: Engine) {
+fun LiveRunning(e: Engine, streets: Boolean = false) {
     val snap = Live.snap
     val view = LocalView.current
     DisposableEffect(Unit) { view.keepScreenOn = true; onDispose { view.keepScreenOn = false } }
@@ -152,23 +153,41 @@ fun LiveRunning(e: Engine) {
         // Who is listening: GPS and the sensor, as two quiet lights.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text((TYPE_NAMES[Live.type] ?: "Run").uppercase(), Modifier.weight(1f), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 22.sp, letterSpacing = 1.sp, color = Ink)
-            Light("GPS", snap.gps == "GPS locked"); Spacer(Modifier.width(12.dp)); Light("HR", snap.hr > 0)
+            Light(if (snap.acc >= 0 && snap.gps != "GPS lost") "GPS ±${snap.acc} m" else "GPS", snap.gps == "GPS locked", if (snap.acc >= 0 && snap.gps != "GPS lost") gpsColor(snap.acc) else null)
+            Spacer(Modifier.width(12.dp)); Light("HR", snap.hr > 0)
         }
 
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            val r = minOf(maxWidth / 2, maxHeight / 1.5f)
-            ZoneDial(snap, e, st, zones, mark, Modifier.fillMaxSize())
-            Column(Modifier.offset(y = r * .2f), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (snap.hr > 0) {
-                    Text("${snap.hr}", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = (r.value * .62f).sp, lineHeight = (r.value * .58f).sp, color = mark)
-                    Text("BPM · ZONE ${snap.zone}", fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.2.sp, color = Dim)
-                } else {
-                    Text(if (snap.stepLeft > 0) clock(snap.stepLeft) else fmtDur(snap.elapsed), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = (r.value * .5f).sp, lineHeight = (r.value * .5f).sp, color = Ink)
-                    Text(if (snap.stepLeft > 0) "LEFT IN THIS BLOCK" else "RUNNING", fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.2.sp, color = Dim)
+        // Two views of the same moment: the zone dial, and where you are. Swipe between them.
+        val pager = androidx.compose.foundation.pager.rememberPagerState { 2 }
+        androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f)) { page ->
+            if (page == 0) {
+            BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                val r = minOf(maxWidth / 2, maxHeight / 1.5f)
+                ZoneDial(snap, e, st, zones, mark, Modifier.fillMaxSize())
+                Column(Modifier.offset(y = r * .2f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (snap.hr > 0) {
+                        Text("${snap.hr}", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = (r.value * .62f).sp, lineHeight = (r.value * .58f).sp, color = mark)
+                        Text("BPM · ZONE ${snap.zone}", fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.2.sp, color = Dim)
+                    } else {
+                        Text(if (snap.stepLeft > 0) clock(snap.stepLeft) else fmtDur(snap.elapsed), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = (r.value * .5f).sp, lineHeight = (r.value * .5f).sp, color = Ink)
+                        Text(if (snap.stepLeft > 0) "LEFT IN THIS BLOCK" else "RUNNING", fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.2.sp, color = Dim)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(state.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 36.sp, color = mark)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(state.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 36.sp, color = mark)
             }
+            } else Box(Modifier.fillMaxSize().padding(vertical = 4.dp)) {
+                RouteMap(snap.route, List(snap.elapsed / TRACE_STEP + 1) { 0 }, e, streets, Modifier.fillMaxSize(), kmSecs(snap.splits), live = true)
+                // The heart rate rides along, so the map view doesn't cost you the one number that matters.
+                Column(Modifier.align(Alignment.TopStart).padding(12.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xE60B3A34)).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(if (snap.hr > 0) "${snap.hr}" else state.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = if (snap.hr > 0) 34.sp else 20.sp, color = mark)
+                    if (snap.hr > 0) Text("${state.head.uppercase()} · Z${snap.zone}", fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, letterSpacing = 1.sp, color = Dim)
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            for (i in 0..1) Box(Modifier.padding(horizontal = 4.dp).size(if (pager.currentPage == i) 8.dp else 6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (pager.currentPage == i) Ink else Track))
+            Text(if (pager.currentPage == 0) "  swipe for the route" else "  swipe for the dial", fontFamily = BodyFont, fontSize = 12.sp, color = Dim)
         }
         Text(state.sub, Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 20.sp, color = Dim)
 
@@ -209,9 +228,9 @@ fun LiveRunning(e: Engine) {
 }
 
 @Composable
-private fun Light(name: String, on: Boolean) {
+private fun Light(name: String, on: Boolean, color: Color? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (on) Color(0xFF5BE0C6) else Color(0x55FFFFFF)))
+        Box(Modifier.size(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color ?: if (on) Color(0xFF5BE0C6) else Color(0x55FFFFFF)))
         Text(name, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = if (on) Ink else Dim)
     }
 }

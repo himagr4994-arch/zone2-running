@@ -65,7 +65,7 @@ object ShareCard {
     /** Everything a look needs: the canvas, where the safe area starts and ends, and the three figures. */
     private class Card(val cv: Canvas, val k: Ink, val h: Float, story: Boolean, val r: Run, val zone: (Int) -> Int, val p: Float) {
         /** How far the picture has drawn itself, eased; 1 for a still. The figures count up over the first four fifths. */
-        val e = ease(p); private val count = ease(p / .8f)
+        val e = p.coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }; private val count = ease(p / .8f)      // the drawing starts and ends gently; the numbers rush, then settle
         // Instagram covers the top and bottom of a story with its own controls: keep clear of both.
         val top = if (story) 250f else 70f
         val bottom = if (story) h - 300f else h - 80f

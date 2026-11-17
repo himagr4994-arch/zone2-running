@@ -100,6 +100,9 @@ class ScreensTest {
             if (story) File("build/shots/share-mid-$i.png").outputStream().use { mid.compress(Bitmap.CompressFormat.PNG, 100, it) }
             File("build/shots/share-${if (story) "story" else "post"}-$i.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
+        // Frames of four animated looks, for a preview film assembled outside the test.
+        for (i in listOf(0, 1, 2, 8)) { File("build/shots/anim/$i").mkdirs()
+            for (f in 0 until 72) File("build/shots/anim/$i/f%03d.png".format(f)).outputStream().use { ShareCard.render(ctx, traced, i, photo, true, .5f, minOf(1f, f / 52f)) { e2.zoneOf(it) }.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         // A run with no trace, route or photo still draws every look; an ultra still fits.
         for (i in ShareCard.STYLES.indices) assertEquals(1080, ShareCard.render(ctx, looped.copy(route = emptyList(), distKm = 128.4, durSec = 50000), i).width)
         val sticker = ShareCard.render(ctx, traced, ShareCard.STAMP)

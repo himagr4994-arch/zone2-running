@@ -172,7 +172,10 @@ shot("after-free-run")
 # Log a run by hand, then make its share picture and its animated video and pull both off the emulator.
 tap("Log it instead")
 for label, value in [("Distance", "6.2"), ("Time", "41:30"), ("Average HR", "141")]:
-    tap(label)
+    for attempt in range(4):                      # the keyboard can cover the lower fields: scroll them into view
+        if tap(label, must=attempt == 3):
+            break
+        adb("shell", "input", "swipe", "500", "900", "500", "450", "300"); time.sleep(1)
     adb("shell", "input", "text", value)
     time.sleep(.6)
 adb("shell", "input", "keyevent", "4")          # close the keyboard

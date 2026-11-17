@@ -30,9 +30,10 @@ def shot(label):
 
 def nodes():
     """Every visible piece of text on screen with the centre of its box."""
-    for _ in range(12):
-        adb("shell", "uiautomator", "dump", "/sdcard/ui.xml")
-        xml = adb("shell", "cat", "/sdcard/ui.xml")
+    why = ""
+    for _ in range(40):
+        why = adb("shell", "uiautomator", "dump", "/sdcard/ui.xml")
+        xml = adb("shell", "cat", "/sdcard/ui.xml") if "dumped" in why.lower() else ""
         if xml.strip().startswith("<?xml"):
             out = []
             for n in ET.fromstring(xml).iter("node"):
@@ -49,8 +50,8 @@ def nodes():
                 time.sleep(8)
                 continue
             return out
-        time.sleep(1.5)
-    fail("could not read the screen")
+        time.sleep(2)
+    fail(f"could not read the screen: {why.strip()[:200]}")
 
 
 def texts():

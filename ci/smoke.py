@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+Smoke test on a real Android emulator: install an APK, walk through first-run setup, open the main
+screens, start and discard a live run, and fail if the app crashes anywhere along the way.
+
+Usage: smoke.py <apk> <name>     Screenshots are written to shots/<name>-*.png.
+"""
+import os, re, subprocess, sys, time
+import xml.etree.ElementTree as ET
+
+PKG = "app.zone2running"
+apk, name = sys.argv[1], sys.argv[2]
+os.makedirs("shots", exist_ok=True)
+step_no = 0
+
+
+def adb(*a, check=False, timeout=120):
+    r = subprocess.run(["adb", *a], capture_output=True, text=True, timeout=timeout)
+    if check and r.returncode != 0:
+        raise SystemExit(f"adb {' '.join(a)} failed: {r.stderr or r.stdout}")
+    return r.stdout
+
+
+def shot(label):
+    global step_no
+    step_no += 1
+    with open(f"shots/{name}-{step_no:02d}-{label}.png", "wb") as f:
+        f.write(subprocess.run(["adb", "exec-out", "screencap", "-p"], capture_output=True, timeout=60).stdout)
+
+
+def nodes():
+    """Every visible piece of text on screen with the centre of its box."""
+    for _ in range(6):
+        adb("shell", "uiautomator", "dump", "/sdcard/ui.xml")
+        xml = adb("shell", "cat", "/sdcard/ui.xml")
+        if xml.strip().startswith("<?xml"):
+            out = []
+            for n in ET.fromstring(xml).iter("node"):
+                label = n.get("text") or n.get("content-desc") or ""
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n.get("bounds", ""))
+                if label and m:
+                    x0, y0, x1, y1 = map(int, m.groups())
+                    out.append((label, (x0 + x1) // 2, (y0 + y1) // 2))
+            return out
+        time.sleep(1.5)
+    fail("could not read the screen")
+
+
+def texts():
+    return [t for t, _, _ in nodes()]
+
+
+def has(label):
+    return any(label.lower() in t.lower() for t in texts())
+
+
+def tap(label, last=False, must=True):
+    hits = [(t, x, y) for t, x, y in nodes() if t.lower() == label.lower()] or [(t, x, y) for t, x, y in nodes() if label.lower() in t.lower()]
+    if not hits:
+        if must:
+            fail(f"nothing to tap called '{label}'. On screen: {texts()[:40]}")
+        return False
+    _, x, y = hits[-1] if last else hits[0]
+    adb("shell", "input", "tap", str(x), str(y))
+    time.sleep(1.2)
+    alive(f"after tapping '{label}'")
+    return True
+
+
+def alive(where):
+    if not adb("shell", "pidof", PKG).strip():
+        fail(f"the app is not running {where}")
+    if "FATAL EXCEPTION" in adb("logcat", "-d", "-s", "AndroidRuntime:E"):
+        fail(f"the app crashed {where}")
+
+
+def expect(label, where):
+    for _ in range(8):
+        if has(label):
+            return
+        time.sleep(1)
+    fail(f"expected '{label}' {where}. On screen: {texts()[:40]}")
+
+
+def fail(msg):
+    shot("FAILED")
+    print(f"\nFAILED [{name}]: {msg}\n")
+    print(adb("logcat", "-d", "-s", "AndroidRuntime:E")[-6000:])
+    sys.exit(1)
+
+
+adb("uninstall", PKG)
+adb("install", "-r", apk, check=True, timeout=300)
+for p in ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"]:
+    adb("shell", "pm", "grant", PKG, f"android.permission.{p}")
+adb("logcat", "-c")
+adb("emu", "geo", "fix", "78.0", "20.0")
+adb("shell", "am", "start", "-W", "-n", f"{PKG}/.MainActivity", check=True)
+time.sleep(4)
+alive("after launch")
+shot("intro")
+
+# First run: Dil's intro, then the setup questions. Tap whichever answer is on screen until the tabs appear.
+answers = ["Skip", "Start training", "I understand", "Not now", "Running regularly", "8 weeks", "Sunday", "Next"]
+for i in range(30):
+    seen = texts()
+    if any(t == "Plan" for t in seen) and any(t == "Progress" for t in seen):
+        break
+    pick = next((a for a in answers if any(a.lower() in t.lower() for t in seen)), None)
+    if pick is None:
+        fail(f"setup is stuck. On screen: {seen[:40]}")
+    if pick == "Start training":
+        shot("plan-preview")
+    tap(pick)
+else:
+    fail("setup never finished")
+print(f"[{name}] setup finished")
+shot("today")
+
+tap("Plan"); shot("plan")
+tap("Progress"); shot("progress")
+tap("Today")
+
+# A live run: briefing, GPS meter, start, the full-screen view, pause, discard.
+tap("Start run")
+expect("GPS signal", "on the briefing screen")
+shot("briefing")
+adb("shell", "input", "swipe", "500", "1500", "500", "500", "300")
+time.sleep(1)
+tap("Start run", last=True)
+expect("Pause", "on the live run screen")
+for i in range(6):
+    adb("emu", "geo", "fix", str(78.0 + i * 0.0004), "20.0")
+    time.sleep(2)
+alive("during the live run")
+shot("live")
+tap("Pause")
+expect("Finish", "after pausing")
+shot("paused")
+tap("Discard this run")
+expect("Plan", "after discarding the run")
+alive("after the live run")
+shot("back-home")
+print(f"[{name}] PASSED")

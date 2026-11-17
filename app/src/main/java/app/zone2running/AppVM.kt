@@ -217,8 +217,15 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     }
 
     /** Sends a run's share picture, in the chosen look, to Android's share sheet. */
-    fun shareRun(r: Run, style: Int, photo: android.graphics.Bitmap? = null) {
-        try { ShareCard.share(getApplication(), r, style, photo) } catch (e: Exception) { toast = "Couldn't open sharing on this phone" }
+    fun shareRun(r: Run, style: Int, photo: android.graphics.Bitmap?, story: Boolean) {
+        val e = engine()
+        try { ShareCard.share(getApplication(), r, style, photo, story) { e.zoneOf(it) } } catch (x: Exception) { toast = "Couldn't open sharing on this phone" }
+    }
+
+    /** Saves the picture to the gallery, which is how the see-through overlay gets into Instagram as a sticker. */
+    fun saveShare(r: Run, style: Int, photo: android.graphics.Bitmap?, story: Boolean) {
+        val e = engine()
+        toast = try { if (ShareCard.save(getApplication(), r, style, photo, story) { e.zoneOf(it) }) "Saved to your gallery, in Zone 2 Running" else "Saving needs Android 10 or newer. Use Share." } catch (x: Exception) { "Couldn't save the picture" }
     }
 
     /** Applies a suggestion the runner agreed to. */

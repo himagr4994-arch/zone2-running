@@ -113,7 +113,7 @@ fun App(vm: AppVM) {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
                 Live.snap.active && reward == null && form == null -> LiveRunning(e, vm.settings.mapTiles)
                 running && reward == null && form == null -> Page(arrive = true) { LiveScreen(vm, e, live) { live = null } }
-                sharing != null -> Page(arrive = true) { SharePicker(vm, sharing!!) { sharing = null } }
+                sharing != null -> Page(arrive = true) { SharePicker(vm, e, sharing!!) { sharing = null } }
                 reward != null -> Box {
                     Page(arrive = true) { RewardScreen(reward, feel = vm.data.runs.firstOrNull { it.id == reward.run.id }?.feel ?: 0, rate = { vm.setFeel(reward.run.id, it) }, share = { sharing = reward.run }) { vm.celebration = null; go(0) } }
                     if (reward.celebrate) Confetti()

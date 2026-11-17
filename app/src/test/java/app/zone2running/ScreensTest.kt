@@ -82,10 +82,17 @@ class ScreensTest {
         val photo = Bitmap.createBitmap(900, 1200, Bitmap.Config.ARGB_8888).also { b -> val c = android.graphics.Canvas(b)
             c.drawRect(0f, 0f, 900f, 1200f, android.graphics.Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 900f, 1200f, 0xFF4E8FB8.toInt(), 0xFFE9B27A.toInt(), android.graphics.Shader.TileMode.CLAMP) })
             c.drawCircle(450f, 520f, 190f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF4E3C8.toInt() }) }
-        File("build/shots/share-route.png").outputStream().use { ShareCard.render(ctx, looped, 2).compress(Bitmap.CompressFormat.PNG, 100, it) }
-        File("build/shots/share-photo.png").outputStream().use { ShareCard.render(ctx, looped, 3, photo).compress(Bitmap.CompressFormat.PNG, 100, it) }
-        assertEquals(ShareCard.H, ShareCard.render(ctx, looped.copy(distKm = 128.4, durSec = 50000), 0).height)      // an ultra still draws
-        for (i in 0..1) File("build/shots/share-long-$i.png").outputStream().use { ShareCard.render(ctx, looped, i).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val traced = looped.copy(trace = List(540) { i -> val x = i / 540.0
+            (118 + 34 * kotlin.math.min(1.0, x * 6) + 10 * kotlin.math.sin(x * 21) + 7 * kotlin.math.sin(x * 57) + 16 * x + (if (x > .55 && x < .7) 14 else 0)).toInt() })
+        val e2 = vm.engine()
+        for (story in listOf(true, false)) for (i in ShareCard.STYLES.indices) {
+            val b = ShareCard.render(ctx, traced, i, photo, story, 1f) { e2.zoneOf(it) }
+            assertEquals(ShareCard.height(i, story), b.height)
+            File("build/shots/share-${if (story) "story" else "post"}-$i.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        // A run with no trace, route or photo still draws every look; an ultra still fits.
+        for (i in ShareCard.STYLES.indices) assertEquals(1080, ShareCard.render(ctx, looped.copy(route = emptyList(), distKm = 128.4, durSec = 50000), i).width)
+        assertEquals(0, ShareCard.render(ctx, traced, ShareCard.OVERLAY).getPixel(5, 5) ushr 24)             // the overlay's corner is fully see-through
         rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists(); shot("run-page")
         rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
         rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()

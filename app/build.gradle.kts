@@ -22,7 +22,7 @@ android {
         versionCode = 11
         versionName = "0.9.0"
         // "owner/repository" on GitHub. Leave empty to hide the update check.
-        buildConfigField("String", "UPDATE_REPO", "\"\"")
+        buildConfigField("String", "UPDATE_REPO", "\"himagr4994-arch/zone2-running\"")
     }
     signingConfigs {
         if (keystoreProps.containsKey("storeFile")) {
@@ -36,8 +36,13 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfigs.findByName("release")?.let { signingConfig = it }
+            // "-Plean" strips the parts of the libraries the app never calls: about 2 MB instead of 9.
+            val lean = providers.gradleProperty("lean").isPresent
+            isMinifyEnabled = lean
+            isShrinkResources = lean
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Without the private release key (on CI, or a fresh clone) the build is signed with the debug key so it still installs.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

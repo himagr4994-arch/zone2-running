@@ -83,9 +83,11 @@ def alive(where):
 
 
 def expect(label, where):
-    for _ in range(8):
+    for attempt in range(8):
         if has(label):
             return
+        if attempt in (3, 5):                     # it may be below the fold
+            adb("shell", "input", "swipe", "500", "1600", "500", "600", "300")
         time.sleep(1)
     fail(f"expected '{label}' {where}. On screen: {texts()[:40]}")
 

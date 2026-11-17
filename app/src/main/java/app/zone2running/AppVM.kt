@@ -71,6 +71,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     var celebration by mutableStateOf<Celebration?>(null)
     var toast by mutableStateOf<String?>(null)
     var healthGranted by mutableStateOf(false); private set
+    var healthExtras by mutableStateOf(false); private set
     var importing by mutableStateOf(false); private set
     /** Time of day the home screen was last opened; it decides what leads. */
     var clock by mutableStateOf(java.time.LocalTime.now())
@@ -114,6 +115,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun refreshHealth() = viewModelScope.launch {
         clock = java.time.LocalTime.now()
         healthGranted = try { health.granted() } catch (e: Exception) { false }
+        healthExtras = try { health.extrasGranted() } catch (e: Exception) { false }
         if (healthGranted && settings.autoImport && settings.onboarded) importHealth(manual = false)
         refreshOnline()
     }
@@ -160,6 +162,16 @@ class AppVM(app: Application) : AndroidViewModel(app) {
                 val known = data.runs.map { it.id }.toSet() + data.hidden
                 // Skip anything already typed in by hand: same day, distance within 5%.
                 val fresh = found.filter { n -> n.id !in known && data.runs.none { it.date == n.date && abs(it.distKm - n.distKm) <= n.distKm * .05 } }.map { withHeat(it) }
+                // Runs imported by an older version, or before extra detail was allowed, pick up what is now readable. Anything typed in by hand stays.
+                val byId = found.associateBy { it.id }
+                val filled = data.runs.map { old ->
+                    val n = byId[old.id] ?: return@map old
+                    if ((old.trace.isEmpty() && n.trace.isNotEmpty()) || (old.pace.isEmpty() && n.pace.isNotEmpty()) || (old.cadence == 0 && n.cadence > 0) || (old.kcal == 0 && n.kcal > 0))
+                        old.copy(trace = n.trace.ifEmpty { old.trace }, pace = n.pace.ifEmpty { old.pace }, zoneSec = n.zoneSec.ifEmpty { old.zoneSec }, splits = old.splits.ifEmpty { n.splits },
+                            cadence = maxOf(old.cadence, n.cadence), kcal = maxOf(old.kcal, n.kcal), climb = maxOf(old.climb, n.climb))
+                    else old
+                }
+                if (filled != data.runs) commit(data.copy(runs = filled))
                 if (fresh.isNotEmpty()) {
                     val before = engine()
                     commit(data.copy(runs = data.runs + fresh))

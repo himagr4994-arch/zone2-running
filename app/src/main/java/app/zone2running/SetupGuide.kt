@@ -170,11 +170,15 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         when {
             !vm.health.available() -> Body("Health Connect isn't available on this phone, so runs are added by hand.", p.muted)
             !vm.healthGranted -> {
-                Body("Import runs recorded by your watch app, Strava or any app that writes to Health Connect. Zone 2 Running only reads runs, their distance and heart rate. Nothing is written back and nothing leaves your phone.")
-                Btn("Connect Health Connect") { ask.launch(vm.health.permissions) }
+                Body("Import runs recorded by your watch app, Strava or any app that writes to Health Connect. Zone 2 Running only reads runs: distance, heart rate, and if you allow them pace, steps, calories and climb. Nothing is written back and nothing leaves your phone.")
+                Btn("Connect Health Connect") { ask.launch(vm.health.permissions + vm.health.extras) }
             }
             else -> {
-                NoteBox(Note("good", "Connected. Zone 2 Running reads runs, distance and heart rate."))
+                NoteBox(Note("good", "Connected. Zone 2 Running reads runs, distance and heart rate" + if (vm.healthExtras) ", plus pace, steps, calories and climb." else "."))
+                if (!vm.healthExtras) {
+                    Small("Allow four more and each run page gets richer: pace through the run, cadence, calories and climb. Still read-only, still on your phone.")
+                    Btn("Allow more run detail", small = true) { ask.launch(vm.health.permissions + vm.health.extras) }
+                }
                 Toggle("Import new runs automatically", "Checks each time you open the app.", s.autoImport) { v -> vm.updateSettings { it.copy(autoImport = v) } }
                 Btn(if (vm.importing) "Importing…" else "Import now", ghost = true) { vm.importHealth(manual = true) }
             }

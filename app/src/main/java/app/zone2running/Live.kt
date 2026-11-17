@@ -74,6 +74,9 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
     private val recent = ArrayDeque<Pair<Int, Double>>()
     /** Heart rate every five seconds for the last fifteen minutes, for the trace on the run screen. */
     val trace = ArrayDeque<Int>()
+    /** The whole run on the TRACE_STEP grid, kept with the saved run: heart rate, and pace over the last half minute. */
+    val hrLog = ArrayList<Int>(); val paceLog = ArrayList<Int>()
+    private val dist = ArrayList<Double>()
 
     fun zoneOf(h: Int): Int { var z = 1; for (i in 1..4) if (h >= zb[i]) z++; return z }
     val step: Step? get() = steps.getOrNull(stepIndex)
@@ -94,6 +97,11 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
         hr = hrNow
         if (hrNow > 0) { hrSum += hrNow; hrN++; kmHrSum += hrNow; kmHrN++; if (hrNow > hrMax) hrMax = hrNow; zoneSec[zoneOf(hrNow) - 1]++ }
         if (elapsed % 5 == 0 && hrNow > 0) { trace.addLast(hrNow); if (trace.size > 180) trace.removeFirst() }
+        if (elapsed % TRACE_STEP == 0) {
+            hrLog += hrNow; dist += meters
+            val back = dist.getOrNull(dist.size - 4)            // 30 seconds ago
+            paceLog += if (back != null && meters - back >= 15) (30 / (meters - back) * 1000).roundToInt().coerceAtMost(1800) else 0
+        }
         recent.addLast(elapsed to meters); while (recent.size > 1 && elapsed - recent.first().first > 45) recent.removeFirst()
         val cur = step
         if (cur != null && cur.sec > 0 && stepElapsed >= cur.sec) {
@@ -129,9 +137,10 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
     /** After a pause, the first fix must not bridge the gap. */
     fun resumed() { lastLat = Double.NaN; recent.clear() }
 
-    fun toRun(date: LocalDate, type: String, startMin: Int) = Run(
+    fun toRun(date: LocalDate, type: String, startMin: Int, kind: String = "") = Run(
         "live_${date.toString().replace("-", "")}_${System.currentTimeMillis().toString(36)}", date, type, (meters / 10).roundToInt() / 100.0, elapsed,
         avgHr, hrMax, source = "live", zoneSec = if (hrN >= 30) zoneSec.toList() else emptyList(), startMin = startMin, splits = splits.toList(),
+        trace = if (hrN >= 30) hrLog.toList() else emptyList(), pace = if (meters >= 200) paceLog.toList() else emptyList(), steps = steps, kind = kind,
     )
 }
 
@@ -146,12 +155,12 @@ data class LiveSnap(
 object Live {
     var snap by mutableStateOf(LiveSnap())
     var result by mutableStateOf<Run?>(null)
-    var steps: List<Step> = emptyList(); var zb: List<Int> = listOf(0, 0, 0, 0, 0); var type = "easy"
+    var steps: List<Step> = emptyList(); var zb: List<Int> = listOf(0, 0, 0, 0, 0); var type = "easy"; var kind = ""
     var sensorAddr = ""; var voice = true
     internal var service: RunService? = null
 
-    fun start(ctx: Context, steps: List<Step>, zb: List<Int>, type: String, sensorAddr: String, voice: Boolean) {
-        this.steps = steps; this.zb = zb; this.type = type; this.sensorAddr = sensorAddr; this.voice = voice; result = null
+    fun start(ctx: Context, steps: List<Step>, zb: List<Int>, type: String, sensorAddr: String, voice: Boolean, kind: String = "") {
+        this.kind = kind; this.steps = steps; this.zb = zb; this.type = type; this.sensorAddr = sensorAddr; this.voice = voice; result = null
         snap = LiveSnap(active = true, stepLabel = steps.firstOrNull()?.label ?: "", sensor = if (sensorAddr.isEmpty()) "" else "Connecting")
         val i = Intent(ctx, RunService::class.java)
         if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
@@ -310,7 +319,7 @@ class RunService : Service() {
     fun setPaused(p: Boolean) { paused = p; if (!p) tracker.resumed(); publish(); notifyNow() }
 
     fun finish(save: Boolean) {
-        if (save && tracker.elapsed >= 60) Live.result = tracker.toRun(LocalDate.now(), Live.type, startMin)
+        if (save && tracker.elapsed >= 60) Live.result = tracker.toRun(LocalDate.now(), Live.type, startMin, Live.kind)
         Live.snap = LiveSnap()
         stopSelf()
     }

@@ -43,7 +43,7 @@ private fun Briefing(vm: AppVM, e: Engine, session: Session, close: () -> Unit) 
     val scanner = remember { HeartSensor(ctx) }
     DisposableEffect(Unit) { onDispose { scanner.stopScan() } }
 
-    fun begin() = Live.start(ctx, steps, e.zb, session.type, vm.settings.sensorAddr, vm.settings.voiceOn)
+    fun begin() = Live.start(ctx, steps, e.zb, session.type, vm.settings.sensorAddr, vm.settings.voiceOn, session.kind)
     val askStart = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
         if (got[Manifest.permission.ACCESS_FINE_LOCATION] == true) begin()
         else note = "Location is needed to measure distance during the run. Without it you can still log the run by hand afterwards."

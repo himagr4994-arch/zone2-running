@@ -443,4 +443,62 @@ class EngineTest {
         assertTrue(Engine(done.copy(talkHr = 150), runs, today).suggestions().none { it.act == EnterTalk || it.act == TalkTest })
         assertEquals(35 * 60, Engine(s, emptyList(), today).let { e -> e.steps(e.weekPlan(today).ses[2]!!.copy(kind = "talk")).sumOf { it.sec } } + 120)
     }
+
+    // ---- the run debrief ----
+
+    /** A heart-rate trace on the 10-second grid, built from (seconds, start bpm, end bpm) pieces. */
+    private fun trace(vararg parts: Triple<Int, Int, Int>) = parts.flatMap { (sec, a, b) -> List(sec / TRACE_STEP) { i -> a + (b - a) * i / (sec / TRACE_STEP) } }
+
+    @Test fun samplesBecomeAnEvenTraceAndGapsStayEmpty() {
+        val t = traceFrom(listOf(0L to 100, 60L to 130, 120L to 130, 500L to 150, 520L to 152, 540L to 150), 540)
+        assertEquals(55, t.size); assertEquals(100, t[0]); assertEquals(115, t[3]); assertEquals(130, t[12])
+        assertEquals(0, t[30])                                           // five silent minutes are not invented
+        assertEquals(150, t[50]); assertTrue(traceFrom(listOf(0L to 100), 600).isEmpty())
+    }
+
+    @Test fun runWalkDebriefReadsEveryCycle() {
+        val e = Engine(s.copy(planStart = today), emptyList(), today)
+        val steps = e.steps(Session("easy", "Easy run-walk", 30, "", "runwalk"))
+        val tr = (0 until 6).flatMap { c -> trace(Triple(240, 132 + c, 146 + c), Triple(60, 146 + c, 131 + c)) }
+        val r = Run("rw", today, "easy", 3.6, 1800, 140, 151, source = "live", trace = tr, steps = steps, kind = "runwalk")
+        val d = e.debrief(r)
+        assertEquals(12, d.blocks.size); assertTrue(!d.planned)
+        assertEquals("walk", d.blocks[1].step.kind); assertTrue(d.blocks[0].peak > d.blocks[1].low + 10)
+        assertTrue(d.facts.any { it.label == "Walk breaks" && it.value.startsWith("−1") })
+        assertTrue(d.learned.any { it.text.contains("Each walk brought your heart rate down") })
+        assertTrue(d.head.startsWith("Run-walk"))
+    }
+
+    @Test fun intervalDebriefJudgesTheRepsNotTheAverage() {
+        val e = Engine(s.copy(planStart = today), emptyList(), today)
+        val steps = e.steps(Session("intervals", "4 × 4 min hard", 50, "", "4x4"))
+        val tr = trace(Triple(600, 120, 140)) + (0 until 4).flatMap { c -> trace(Triple(240, 140, 170 + c * 2), Triple(180, 168, 138)) } + trace(Triple(600, 140, 125))
+        val d = e.debrief(Run("iv", today, "intervals", 7.0, 2880, 148, 176, source = "live", trace = tr, steps = steps, kind = "4x4"))
+        assertEquals("Intervals done", d.head)
+        assertEquals(4, d.blocks.count { it.step.kind == "hard" })
+        assertTrue(d.facts.any { it.label == "Rep peaks" }); assertTrue(d.facts.any { it.label == "Recovery" })
+        assertTrue(d.learned.any { it.text.contains("rising gently") })
+        assertTrue(d.next.contains("properly easy"))
+    }
+
+    @Test fun importedHardRunIsCalledWhatItWas() {
+        val tr = trace(Triple(360, 118, 150), Triple(600, 150, 164), Triple(3340, 162, 172))
+        val r = tenK.copy(source = "health", trace = tr, zoneSec = listOf(200, 160, 240, 2600, 1100))
+        val d = Engine(s, listOf(r), today).debrief(r)
+        assertEquals("A hard effort", d.head)
+        assertTrue(d.facts.any { it.label == "Above Zone 2 from" })
+        assertTrue(d.learned.any { it.text.contains("doesn't count as Zone 2 time") })
+        assertTrue(d.blocks.isEmpty())                                   // no session was followed, so no blocks are made up
+        // An old run with only an average still gets a verdict.
+        assertEquals("A hard effort", Engine(s, listOf(tenK), today).debrief(tenK).head)
+    }
+
+    @Test fun plannedBlocksAreLaidOverAnImportedRunThatFits() {
+        val set = s.copy(planStart = today, overrides = mapOf(today to "runwalk"))
+        val tr = (0 until 8).flatMap { trace(Triple(240, 134, 146), Triple(60, 146, 132)) }
+        val r = Run("hc", today, "easy", 4.8, 2400, 140, 147, source = "health", trace = tr)
+        val d = Engine(set, listOf(r), today).debrief(r)
+        assertTrue(d.planned); assertEquals(16, d.blocks.size)
+        assertTrue(Engine(s.copy(planStart = today), listOf(r.copy(date = today.plusDays(1))), today).debrief(r.copy(date = today.plusDays(1))).blocks.isEmpty())
+    }
 }

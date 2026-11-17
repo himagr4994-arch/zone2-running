@@ -29,6 +29,7 @@ GPS is used only while a live run is in progress, to measure distance. The app k
 | Permission | Why |
 |---|---|
 | Health Connect: read exercise, heart rate, distance | Import runs recorded by other apps. Read-only. |
+| Health Connect: read speed, steps, calories, elevation gained (optional) | Extra detail on each run page: pace through the run, cadence, calories, climb. Read-only. The app works without them. |
 | Location | Measure distance during a live run |
 | Foreground service | Keep a live run going with the screen off |
 | Bluetooth | Connect a heart-rate sensor during a live run (optional) |

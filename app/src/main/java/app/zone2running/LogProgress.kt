@@ -90,7 +90,7 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, close: () 
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Label("${DAY_NAMES[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)} ${r.date.year}" + if (r.startMin >= 0) " · ${fmtClock(r.startMin)}" else "")
-        Text(TYPE_NAMES[r.type] ?: "Run", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 32.sp, color = p.ink)
+        Text(SWAP_KINDS[r.kind]?.takeIf { r.kind in setOf("runwalk", "talk", "4x4", "6x3") } ?: TYPE_NAMES[r.type] ?: "Run", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 32.sp, color = p.ink)
     }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -102,26 +102,51 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, close: () 
                 Column(Modifier.weight(1f)) { Text(v, fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 30.sp, color = p.heroInk); Text(l, fontSize = 13.sp, color = p.heroMuted, fontFamily = BodyFont) }
         }
     }
+    val d = remember(r, e) { e.debrief(r) }
+    if (r.cadence > 0 || r.kcal > 0 || r.climb > 0) Small(listOfNotNull(if (r.cadence > 0) "${r.cadence} steps a minute" else null, if (r.kcal > 0) "${r.kcal} kcal" else null, if (r.climb > 0) "${r.climb} m climbed" else null).joinToString("  ·  "), p.ink)
+
+    // The verdict in one line up top; the reasons and the advice come last, after the evidence.
+    Text(d.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 30.sp, color = p.ink)
+
+    if (r.trace.count { it > 0 } >= 30) RunCharts(e, r, d)
+
+    if (d.blocks.size > 1) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Label("Block by block")
+        BlockRows(e, d.blocks)
+        if (d.planned) Small("Blocks are laid over from the day's plan, assuming you started the session when the run began.")
+    }
+
     if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val tot = r.zoneSec.sum(); val easy = r.zoneSec[0] + r.zoneSec[1]
+        val tot = r.zoneSec.sum()
         Label("Time in zones")
         ZoneBar(r.zoneSec)
-        Text("${easy / 60} of ${tot / 60} minutes in Zone 2 or below (${(easy * 100f / tot).roundToInt()}%).", fontFamily = BodyFont, fontSize = 15.sp, color = p.ink)
-        Small(r.zoneSec.mapIndexedNotNull { i, sec -> if (sec >= 60) "Z${i + 1} ${sec / 60} min" else null }.joinToString(" · "))
+        ZoneRows(e, r.zoneSec)
+        if (tot < r.durSec * .8) Small("Heart rate was recorded for ${tot / 60} of ${r.durSec / 60} minutes.")
     }
-    if (r.splits.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label("Kilometre splits"); SplitBars(r.splits) }
+    if (r.splits.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label("${U.word.replaceFirstChar { it.uppercase() }} splits"); SplitBars(r.splits) }
+
+    if (d.facts.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Label("The numbers")
+        d.facts.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { f -> FactTile(f, Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+
     EffortRow(r.feel, rate)
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("What it says")
-        val est = e.est(r)
-        NoteBox(Note(if (z in 1..2) "good" else "plain", when {
-            est == null && r.type == "intervals" -> "Intervals are left out of the Zone 2 estimate. Their average heart rate says little."
-            est == null -> "Add an average heart rate and this run feeds your Zone 2 estimate."
-            e.estOf(r)?.clean == true -> "A steady run close to ${e.refHr} bpm, so this is a direct reading: ${fmtPace(est)} ${U.per}." + if (steady(r)?.first != paceOf(r)) " It is taken from the steady middle of the run, after the warm-up." else ""
-            z in 1..2 -> "Scaled to ${e.refHr} bpm, it points to about ${fmtPace(est)} ${U.per}. Runs of 20 minutes or more within ten beats of ${e.refHr} give the firmest reading."
-            else -> "Averaged Zone $z. Scaled down to ${e.refHr} bpm, it points to about ${fmtPace(est)} ${U.per}. A rougher reading than an easy run gives."
-        }))
-        if (r.heatPct >= 1.5) Small("Weather that hour slowed running by roughly ${f1(r.heatPct)}%. The estimate allows for it.", p.ink)
+
+    if (d.learned.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Label("What this run says")
+        d.learned.forEach { NoteBox(it) }
+    }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.hero).padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Label("Next time", p.heroMuted)
+        Text(d.next, fontFamily = BodyFont, fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 23.sp, color = p.heroInk)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (r.heatPct >= 1.5) Small("Weather that hour slowed running by roughly ${f1(r.heatPct)}%. The Zone 2 reading allows for it.", p.ink)
         if (r.notes.isNotBlank()) Small(r.notes, p.ink)
         Small(when (r.source) { "health" -> "Imported from Health Connect."; "live" -> "Recorded with a live run."; else -> "Entered by hand." })
     }

@@ -20,6 +20,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
@@ -62,10 +68,10 @@ class ScreensTest {
         rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("runs")
         val d = today.minusDays(1)
         rule.onNodeWithText("${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)} · Easy run").performClick(); rule.waitForIdle()
-        rule.onNodeWithText("WHAT IT SAYS").assertExists(); shot("run-page")
+        rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists(); shot("run-page")
         rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
         rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()
-        rule.onNodeWithText("WHAT IT SAYS").assertExists()
+        rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists()
     }
 
 
@@ -267,5 +273,33 @@ class ScreensTest {
         val again = AppVM(ApplicationProvider.getApplicationContext())
         assertEquals(vm.data.runs, again.data.runs)
         assertEquals(vm.settings, again.settings)
+    }
+
+    private fun tr(vararg parts: Triple<Int, Int, Int>) = parts.flatMap { (sec, a, b) -> List(sec / TRACE_STEP) { i -> a + (b - a) * i / (sec / TRACE_STEP) + (2 * kotlin.math.sin(i / 2.0)).toInt() } }
+
+    /** The run page for three kinds of run: a run-walk, intervals, and an imported hard 10 km. */
+    @Test @Config(qualifiers = "w412dp-h3300dp-xhdpi") fun richRunPages() {
+        val vm = seeded()
+        val e = vm.engine()
+        val rw = e.steps(Session("easy", "Easy run-walk", 40, "", "runwalk"))
+        val rwTrace = (0 until 8).flatMap { c -> tr(Triple(240, 131 + c, 145 + c), Triple(60, 145 + c, 130 + c)) }
+        val a = Run("rich-rw", today, "easy", 4.9, 2400, 141, 153, source = "live", trace = rwTrace, steps = rw, kind = "runwalk",
+            zoneSec = listOf(420, 1740, 240, 0, 0), splits = listOf(Split(492, 138), Split(488, 140), Split(495, 142), Split(486, 144)),
+            pace = (0 until 240).map { i -> if (i % 30 >= 24) 690 + i % 7 * 6 else 450 + i % 5 * 5 }, cadence = 164, kcal = 318)
+        val iv = e.steps(Session("intervals", "4 × 4 min hard", 50, "", "4x4"))
+        val ivTrace = tr(Triple(600, 118, 141)) + (0 until 4).flatMap { c -> tr(Triple(240, 141, 169 + c * 2), Triple(180, 168, 139)) } + tr(Triple(600, 140, 124))
+        val b = Run("rich-iv", today.minusDays(2), "intervals", 6.9, 2880, 148, 177, source = "live", trace = ivTrace, steps = iv, kind = "4x4",
+            zoneSec = listOf(700, 640, 520, 900, 120), splits = listOf(Split(470, 128), Split(452, 139), Split(380, 158), Split(402, 156), Split(385, 160), Split(410, 152)),
+            pace = (0 until 288).map { i -> val t = i * 10; if (t in 600 until 2280 && (t - 600) % 420 < 240) 330 + i % 4 * 4 else 480 + i % 6 * 5 })
+        val c = Run("rich-hc", today.minusDays(1), "hard", 10.26, 4297, 162, 178, source = "health", notes = "Outdoor run",
+            trace = tr(Triple(360, 116, 150), Triple(600, 150, 163), Triple(2400, 161, 168), Triple(930, 166, 176)), zoneSec = listOf(240, 130, 250, 2577, 1100), feel = 3)
+        listOf(a, b, c).forEach { vm.saveRun(it, isNew = false) }
+        var open by androidx.compose.runtime.mutableStateOf(a)
+        rule.setContent { AppTheme { androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize().background(LocalPal.current.bg).padding(20.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp)) { RunPage(vm.engine(), open, rate = {}, edit = {}) {} } } }
+        rule.waitForIdle(); shot("run-rich-runwalk")
+        rule.onNodeWithText("Block by block", ignoreCase = true).assertExists()
+        open = b; rule.waitForIdle(); shot("run-rich-intervals")
+        open = c; rule.waitForIdle(); shot("run-rich-imported")
+        rule.onNodeWithText("A hard effort").assertExists()
     }
 }

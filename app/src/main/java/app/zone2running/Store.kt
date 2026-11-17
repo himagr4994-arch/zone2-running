@@ -36,6 +36,8 @@ object Json {
                 .put("durSec", r.durSec).put("avgHr", r.avgHr).put("maxHr", r.maxHr).put("feel", r.feel)
                 .put("notes", r.notes).put("source", r.source).put("zoneSec", JSONArray(r.zoneSec)).put("startMin", r.startMin)
                 .put("splits", JSONArray(r.splits.flatMap { listOf(it.sec, it.hr) })).put("heatPct", r.heatPct)
+                .put("trace", JSONArray(r.trace)).put("pace", JSONArray(r.pace)).put("kind", r.kind).put("cadence", r.cadence).put("kcal", r.kcal).put("climb", r.climb)
+                .put("steps", JSONArray().also { a -> r.steps.forEach { a.put(JSONObject().put("label", it.label).put("sec", it.sec).put("zLo", it.zLo).put("zHi", it.zHi).put("kind", it.kind)) } })
         )
         return JSONObject().put("app", "zone2-running").put("version", 1).put("settings", so).put("runs", ra)
             .put("hidden", JSONArray(d.hidden.toList())).toString(2)
@@ -76,7 +78,10 @@ object Json {
             if (km <= 0 || sec <= 0) null
             else Run(r.optString("id", "run_$i"), d, r.optString("type", "easy"), km, sec, r.optInt("avgHr", 0), r.optInt("maxHr", 0),
                 r.optInt("feel", 0), r.optString("notes"), r.optString("source", "manual"), ints(r.optJSONArray("zoneSec"), emptyList()), r.optInt("startMin", -1),
-                ints(r.optJSONArray("splits"), emptyList()).chunked(2).filter { it.size == 2 }.map { Split(it[0], it[1]) }, r.optDouble("heatPct", 0.0))
+                ints(r.optJSONArray("splits"), emptyList()).chunked(2).filter { it.size == 2 }.map { Split(it[0], it[1]) }, r.optDouble("heatPct", 0.0),
+                ints(r.optJSONArray("trace"), emptyList()), ints(r.optJSONArray("pace"), emptyList()),
+                r.optJSONArray("steps")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Step(it.optString("label"), it.optInt("sec"), it.optInt("zLo", 1), it.optInt("zHi", 2), it.optString("kind")) } } ?: emptyList(),
+                r.optString("kind"), r.optInt("cadence", 0), r.optInt("kcal", 0), r.optInt("climb", 0))
         }
         val ha = o.optJSONArray("hidden") ?: JSONArray()
         return AppData(s, runs, (0 until ha.length()).map { ha.getString(it) }.toSet())

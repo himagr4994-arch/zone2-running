@@ -6,6 +6,10 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.ElevationGainedRecord
+import androidx.health.connect.client.records.SpeedRecord
+import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -21,6 +25,14 @@ class Health(private val ctx: Context) {
         HealthPermission.getReadPermission(HeartRateRecord::class),
         HealthPermission.getReadPermission(DistanceRecord::class),
     )
+    /** Optional detail: pace through the run, cadence, calories and climb. The app works without any of it. */
+    val extras = setOf(
+        HealthPermission.getReadPermission(SpeedRecord::class),
+        HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(ElevationGainedRecord::class),
+    )
+    suspend fun extrasGranted(): Boolean = available() && client.permissionController.getGrantedPermissions().containsAll(extras)
     private val runTypes = setOf(ExerciseSessionRecord.EXERCISE_TYPE_RUNNING, ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL)
     private val client by lazy { HealthConnectClient.getOrCreate(ctx) }
 
@@ -48,12 +60,32 @@ class Health(private val ctx: Context) {
                 val avg = agg[HeartRateRecord.BPM_AVG]?.toInt() ?: 0
                 val max = agg[HeartRateRecord.BPM_MAX]?.toInt() ?: 0
                 val offset = sx.startZoneOffset ?: ZoneId.systemDefault().rules.getOffset(sx.startTime)
+                val origin = sx.metadata.dataOrigin
+                val beats = try {
+                    client.readRecords(ReadRecordsRequest(HeartRateRecord::class, range, setOf(origin))).records.flatMap { it.samples }
+                        .map { Duration.between(sx.startTime, it.time).seconds to it.beatsPerMinute.toInt() }
+                } catch (e: Exception) { emptyList() }
+                // Each extra is read on its own, so one missing permission or record type doesn't cost the others.
+                val speed = try {
+                    client.readRecords(ReadRecordsRequest(SpeedRecord::class, range, setOf(origin))).records.flatMap { it.samples }
+                        .map { Duration.between(sx.startTime, it.time).seconds to it.speed.inMetersPerSecond }.sortedBy { it.first }
+                } catch (e: Exception) { emptyList() }
+                val paceGrid = if (speed.size < 10) emptyList() else (0..dur / TRACE_STEP).map { i ->
+                    val t = i * TRACE_STEP.toLong()
+                    val near = speed.filter { kotlin.math.abs(it.first - t) <= 15 }.map { it.second }
+                    if (near.isEmpty() || near.average() < .5) 0 else (1000 / near.average()).roundToInt()
+                }
+                val steps = try { client.aggregate(AggregateRequest(setOf(StepsRecord.COUNT_TOTAL), range, setOf(origin)))[StepsRecord.COUNT_TOTAL] ?: 0L } catch (e: Exception) { 0L }
+                val kcal = try { client.aggregate(AggregateRequest(setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL), range, setOf(origin)))[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories ?: 0.0 } catch (e: Exception) { 0.0 }
+                val climb = try { client.aggregate(AggregateRequest(setOf(ElevationGainedRecord.ELEVATION_GAINED_TOTAL), range, setOf(origin)))[ElevationGainedRecord.ELEVATION_GAINED_TOTAL]?.inMeters ?: 0.0 } catch (e: Exception) { 0.0 }
+                val cadence = (steps * 60.0 / dur).roundToInt().takeIf { it in 120..230 } ?: 0      // anything else is not a running step count
                 out += Run(
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
                     distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
                     notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
                     splits = splits(range, sx.metadata.dataOrigin, sx.startTime),
                     startMin = sx.startTime.atOffset(offset).toLocalTime().let { it.hour * 60 + it.minute },
+                    trace = traceFrom(beats, dur), pace = paceGrid, cadence = cadence, kcal = kcal.roundToInt(), climb = climb.roundToInt(),
                 )
             }
             token = page.pageToken
@@ -70,7 +102,10 @@ class Health(private val ctx: Context) {
         splitsFrom(pieces, beats)
     } catch (e: Exception) { emptyList() }
 
-    /** Seconds spent in each zone, from the run's heart-rate samples. Gaps longer than 30 s are not counted. */
+    /**
+     * Seconds spent in each zone, from the run's heart-rate samples. Each reading stands for the time until
+     * the next one, up to two minutes: straps that report once a minute would otherwise lose half the run.
+     */
     private suspend fun zoneSeconds(range: TimeRangeFilter, origin: androidx.health.connect.client.records.metadata.DataOrigin, zoneOf: (Int) -> Int): List<Int> {
         val samples = try {
             client.readRecords(ReadRecordsRequest(HeartRateRecord::class, range, setOf(origin))).records.flatMap { it.samples }.sortedBy { it.time }
@@ -78,7 +113,7 @@ class Health(private val ctx: Context) {
         if (samples.size < 10) return emptyList()
         val sec = IntArray(5)
         for (i in 0 until samples.size - 1) {
-            val dt = Duration.between(samples[i].time, samples[i + 1].time).seconds.coerceIn(0, 30).toInt()
+            val dt = Duration.between(samples[i].time, samples[i + 1].time).seconds.coerceIn(0, 120).toInt()
             sec[zoneOf(samples[i].beatsPerMinute.toInt()) - 1] += dt
         }
         return sec.toList()

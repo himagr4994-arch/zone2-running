@@ -28,7 +28,35 @@ data class Run(
     val startMin: Int = -1,                 // start time as minutes after midnight; -1 when unknown
     val splits: List<Split> = emptyList(),  // one entry per full kilometre
     val heatPct: Double = 0.0,              // how much the weather slowed this run, in percent; 0 when unknown
+    val trace: List<Int> = emptyList(),     // heart rate every TRACE_STEP seconds; 0 where there was no reading
+    val pace: List<Int> = emptyList(),      // seconds per km on the same grid; 0 where unknown
+    val steps: List<Step> = emptyList(),    // the guided blocks this run followed, when it was a live run
+    val kind: String = "",                  // the session kind it followed: runwalk, 4x4, test…
+    val cadence: Int = 0, val kcal: Int = 0, val climb: Int = 0,   // steps per minute, calories, metres climbed; 0 when unknown
 )
+const val TRACE_STEP = 10
+
+/**
+ * Heart-rate samples (seconds from the start, bpm) laid on an even grid. Between two readings up to two
+ * minutes apart the value is interpolated; longer silences stay empty, because guessing across them would
+ * invent data.
+ */
+fun traceFrom(samples: List<Pair<Long, Int>>, durSec: Int): List<Int> {
+    val s = samples.filter { it.second in 30..240 }.sortedBy { it.first }
+    if (s.size < 5) return emptyList()
+    var j = 0
+    return (0..durSec / TRACE_STEP).map { i ->
+        val t = i * TRACE_STEP.toLong()
+        while (j < s.size - 1 && s[j + 1].first <= t) j++
+        val a = s[j]; val b = s.getOrNull(j + 1)
+        when {
+            a.first > t -> if (a.first - t <= 60) a.second else 0
+            b == null -> if (t - a.first <= 60) a.second else 0
+            b.first - a.first > 120 -> if (t - a.first <= 30) a.second else if (b.first - t <= 30) b.second else 0
+            else -> (a.second + (b.second - a.second) * (t - a.first).toDouble() / (b.first - a.first)).roundToInt()
+        }
+    }
+}
 
 data class Split(val sec: Int, val hr: Int)
 
@@ -170,7 +198,7 @@ fun paceOf(r: Run) = r.durSec / r.distKm
 val SWAP_KINDS = linkedMapOf("easy" to "Easy run", "runwalk" to "Run-walk", "long" to "Long easy run", "tempo" to "Tempo", "4x4" to "4 × 4 min intervals", "6x3" to "6 × 3 min intervals", "test" to "Zone 2 test", "talk" to "Talk test")
 
 const val STOP_SIGNS = "Stop and get medical help for chest pain or pressure, fainting or feeling faint, unusual breathlessness, or a racing or irregular heartbeat."
-val FEELS = listOf("Very easy", "Easy", "Steady", "Hard", "All out")
+val FEELS = listOf("Gentle", "Easy", "Steady", "Hard", "All out")
 
 fun median(v: List<Double>): Double = quantile(v, .5)
 /** Quantile of an already sorted list, with straight-line interpolation between neighbours. */

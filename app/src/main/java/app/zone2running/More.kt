@@ -104,7 +104,7 @@ fun MoreScreen(vm: AppVM, e: Engine, page: String, go: (String?) -> Unit, openLe
             }
             Panel {
                 Head("Permissions", 20)
-                listOf("Health Connect" to "Import runs recorded by other apps. Read-only.", "Location" to "Measure distance during a live run.", "Bluetooth" to "Connect a heart-rate sensor. Optional.",
+                listOf("Health Connect" to "Import runs recorded by other apps: distance and heart rate, and optionally pace, steps, calories and climb. Read-only.", "Location" to "Measure distance during a live run.", "Bluetooth" to "Connect a heart-rate sensor. Optional.",
                     "Notifications" to "The daily reminder and the run-in-progress notice.", "Internet" to "Weather and the update check, only when switched on.").forEach { (a, b) ->
                     Column { Text(a, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = p.ink); Small(b) }
                 }

@@ -99,10 +99,11 @@ fun App(vm: AppVM) {
         }
     }
 
-    Scaffold(containerColor = p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(pager.currentPage, go) }) { pad ->
+    Scaffold(containerColor = if (Live.snap.active && reward == null && form == null) liveGround(e) else p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(pager.currentPage, go) }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
             when {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
+                Live.snap.active && reward == null && form == null -> LiveRunning(e)
                 running && reward == null && form == null -> Page(arrive = true) { LiveScreen(vm, e, live) { live = null } }
                 reward != null -> Box {
                     Page(arrive = true) { RewardScreen(reward, feel = vm.data.runs.firstOrNull { it.id == reward.run.id }?.feel ?: 0, rate = { vm.setFeel(reward.run.id, it) }, share = { vm.shareRun(reward) }) { vm.celebration = null; go(0) } }

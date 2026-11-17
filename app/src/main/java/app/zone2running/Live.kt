@@ -72,6 +72,8 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
     private var lastLat = Double.NaN; private var lastLon = 0.0; private var lastFixMs = 0L
     private var overCap = 0; private var lastCapCue = -999
     private val recent = ArrayDeque<Pair<Int, Double>>()
+    /** Heart rate every five seconds for the last fifteen minutes, for the trace on the run screen. */
+    val trace = ArrayDeque<Int>()
 
     fun zoneOf(h: Int): Int { var z = 1; for (i in 1..4) if (h >= zb[i]) z++; return z }
     val step: Step? get() = steps.getOrNull(stepIndex)
@@ -91,6 +93,7 @@ class RunTracker(private val steps: List<Step>, private val zb: List<Int>) {
         elapsed++; stepElapsed++
         hr = hrNow
         if (hrNow > 0) { hrSum += hrNow; hrN++; kmHrSum += hrNow; kmHrN++; if (hrNow > hrMax) hrMax = hrNow; zoneSec[zoneOf(hrNow) - 1]++ }
+        if (elapsed % 5 == 0 && hrNow > 0) { trace.addLast(hrNow); if (trace.size > 180) trace.removeFirst() }
         recent.addLast(elapsed to meters); while (recent.size > 1 && elapsed - recent.first().first > 45) recent.removeFirst()
         val cur = step
         if (cur != null && cur.sec > 0 && stepElapsed >= cur.sec) {
@@ -136,6 +139,7 @@ data class LiveSnap(
     val active: Boolean = false, val paused: Boolean = false, val elapsed: Int = 0, val meters: Double = 0.0, val hr: Int = 0, val zone: Int = 0,
     val stepIndex: Int = 0, val stepLabel: String = "", val stepLeft: Int = 0, val stepKind: String = "", val nextLabel: String = "", val pace: Double? = null,
     val gps: String = "Looking for GPS", val sensor: String = "", val splits: List<Split> = emptyList(), val avgHr: Int = 0, val lastCue: String = "",
+    val trace: List<Int> = emptyList(),
 )
 
 /** The bridge between the run service and the screen. */
@@ -292,7 +296,7 @@ class RunService : Service() {
     private fun publish() {
         val st = tracker.step
         Live.snap = LiveSnap(true, paused, tracker.elapsed, tracker.meters, tracker.hr, if (tracker.hr > 0) tracker.zoneOf(tracker.hr) else 0, tracker.stepIndex,
-            st?.label ?: "Free running", tracker.stepLeft, st?.kind ?: "", tracker.next?.label ?: "", tracker.paceNow(), gpsState, sensor?.status ?: "", tracker.splits.toList(), tracker.avgHr, lastCue)
+            st?.label ?: "Free running", tracker.stepLeft, st?.kind ?: "", tracker.next?.label ?: "", tracker.paceNow(), gpsState, sensor?.status ?: "", tracker.splits.toList(), tracker.avgHr, lastCue, tracker.trace.toList())
     }
 
     private fun notification(): Notification {

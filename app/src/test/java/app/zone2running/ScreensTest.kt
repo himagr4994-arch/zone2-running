@@ -151,12 +151,36 @@ class ScreensTest {
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("Start run").performClick(); rule.waitForIdle()
         rule.onNodeWithText("GUIDED RUN").assertExists(); shot("live-briefing")
-        // The service can't run here, so show the running screen from a snapshot it would publish.
-        Live.snap = LiveSnap(true, false, 1325, 2740.0, 153, 3, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "Connected",
-            listOf(Split(492, 141), Split(478, 146)), 144, "Ease off. Heart rate 153.")
-        rule.waitForIdle(); shot("live-running")
+    }
+
+    /** The service can't run here, so the running screen is drawn from snapshots it would publish. */
+    @Test @Config(qualifiers = "w412dp-h892dp-xhdpi") fun liveRunStates() {
+        val vm = seeded()
+        val e = vm.engine()
+        rule.setContent { AppTheme { App(vm) } }
+        fun wave(n: Int, base: Int, amp: Int, rise: Int = 0) = List(n) { i -> base + rise * i / n + (amp * kotlin.math.sin(i / 4.0)).toInt() }
+        val easy = e.steps(Session("easy", "Easy run", 45, ""))
+        Live.type = "easy"; Live.steps = easy
+        Live.snap = LiveSnap(true, false, 1325, 2740.0, 144, 2, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "Connected",
+            listOf(Split(492, 141), Split(478, 146)), 142, "", wave(120, 141, 3))
+        rule.waitForIdle(); shot("live-1-in-zone")
+        rule.onNodeWithText("In Zone 2").assertExists()
+        Live.snap = Live.snap.copy(hr = 153, zone = 3, trace = wave(120, 143, 3, 9), lastCue = "Ease off. Heart rate 153.")
+        rule.waitForIdle(); shot("live-2-over")
         rule.onNodeWithText("Above Zone 2. Ease off or walk until you're under 150.").assertExists()
-        Live.snap = LiveSnap(); rule.waitForIdle()
+        val hard = e.steps(Session("intervals", "4 × 4 min hard", 50, "", "4x4"))
+        Live.type = "intervals"; Live.steps = hard
+        Live.snap = LiveSnap(true, false, 1150, 2910.0, 166, 4, 3, "Hard, rep 2 of 4", 110, "hard", "Easy jog", 338.0, "GPS locked", "Connected",
+            listOf(Split(420, 138), Split(371, 152)), 149, "", wave(60, 140, 4) + wave(30, 150, 2, 16) + wave(20, 150, 3, -8) + wave(26, 148, 2, 18))
+        rule.waitForIdle(); shot("live-3-intervals")
+        Live.type = "easy"; Live.steps = easy
+        Live.snap = LiveSnap(true, false, 1325, 2740.0, 0, 0, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "", listOf(Split(492, 0), Split(478, 0)))
+        rule.waitForIdle(); shot("live-4-no-sensor")
+        Live.snap = LiveSnap(true, true, 1325, 2740.0, 128, 1, 1, "Easy running", 1175, "easy", "", null, "GPS locked", "Connected",
+            listOf(Split(492, 141), Split(478, 146)), 142, "", wave(120, 141, 3))
+        rule.waitForIdle(); shot("live-5-paused")
+        rule.onNodeWithText("Finish").assertExists()
+        Live.snap = LiveSnap(); Live.steps = emptyList(); rule.waitForIdle()
     }
 
     @Test @Config(qualifiers = "w400dp-h1700dp-xhdpi") fun swapASessionAndSwitchToMiles() {

@@ -216,6 +216,13 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         Reminders.schedule(getApplication(), settings)
     }
 
+    /** Shares any logged run as a picture: the same card a fresh run gets, drawn for this one. */
+    fun shareRun(r: Run) {
+        val after = engine()
+        val before = Engine(data.settings, data.runs.filter { it.id != r.id }, after.today, if (data.settings.weatherOn) weather else null)
+        shareRun(buildCelebration(before, after, listOf(r)))
+    }
+
     fun shareRun(c: Celebration) {
         try { ShareCard.share(getApplication(), c) } catch (e: Exception) { toast = "Couldn't open sharing on this phone" }
     }

@@ -70,6 +70,12 @@ class ScreensTest {
         rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("runs")
         val d = today.minusDays(1)
         rule.onNodeWithText("${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)} · Easy run").performClick(); rule.waitForIdle()
+        // Any logged run can be shared from its own page, and the card is drawn for that run.
+        rule.onNodeWithText("Share").assertExists()
+        val old = vm.data.runs.minBy { it.date }
+        val before = Engine(vm.settings, vm.data.runs.filter { it.id != old.id }, today)
+        val oldCard = ShareCard.render(ApplicationProvider.getApplicationContext(), buildCelebration(before, vm.engine(), listOf(old)))
+        File("build/shots").mkdirs(); File("build/shots/share-card-old-run.png").outputStream().use { oldCard.compress(Bitmap.CompressFormat.PNG, 100, it) }
         rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists(); shot("run-page")
         rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
         rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()

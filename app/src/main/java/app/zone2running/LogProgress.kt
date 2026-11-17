@@ -80,12 +80,13 @@ fun LogScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (FormSeed)
 
 /** One run, shown rather than edited: the pace, where the heart rate sat, the splits, and what it says about Zone 2. */
 @Composable
-fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: Boolean = false, addRoute: ((androidx.health.connect.client.records.ExerciseRoute?) -> Unit)? = null, close: () -> Unit) {
+fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: Boolean = false, addRoute: ((androidx.health.connect.client.records.ExerciseRoute?) -> Unit)? = null, share: (() -> Unit)? = null, close: () -> Unit) {
     val p = LocalPal.current
     val z = if (r.avgHr > 0) e.zoneOf(r.avgHr) else 0
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.clip(androidx.compose.foundation.shape.CircleShape).clickable(onClick = close).padding(10.dp)) { Glyph("left", p.ink, Modifier.size(22.dp)) }
         Spacer(Modifier.weight(1f))
+        if (share != null) TextLink("Share", share)
         TextLink("Edit", edit)
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

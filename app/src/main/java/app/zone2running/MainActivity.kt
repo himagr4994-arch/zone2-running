@@ -117,7 +117,7 @@ fun App(vm: AppVM) {
                 }
                 form != null -> Page(arrive = true) { RunForm(vm, e, form!!) { form = null } }
                 lesson != null -> Page(arrive = true) { LessonScreen(lesson!!, already = lesson!!.id in vm.settings.lessonsDone, close = { lesson = null }) { vm.finishLesson(lesson!!.id); lesson = null } }
-                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }, streets = vm.settings.mapTiles, addRoute = { vm.addRoute(run, it) }) { runId = null } }
+                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }, streets = vm.settings.mapTiles, addRoute = { vm.addRoute(run, it) }, share = { vm.shareRun(run) }) { runId = null } }
                 more != null -> key(more) {
                     Page(arrive = true) { MoreScreen(vm, e, more!!, go = { more = it }, openLesson = { lesson = it }, replayIntro = { more = null; replayIntro = true }, rerunGuide = { more = null; rerunGuide = true }) }
                 }

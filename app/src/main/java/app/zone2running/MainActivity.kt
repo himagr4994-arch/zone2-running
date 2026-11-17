@@ -67,6 +67,7 @@ fun App(vm: AppVM) {
     val scope = rememberCoroutineScope()
     val go: (Int) -> Unit = { scope.launch { pager.animateScrollToPage(it) } }
     var form by remember { mutableStateOf<FormSeed?>(null) }
+    var sharing by remember { mutableStateOf<Run?>(null) }
     var live by remember { mutableStateOf<Session?>(null) }
     var lesson by remember { mutableStateOf<Lesson?>(null) }
     var runId by remember { mutableStateOf<String?>(null) }       // the run whose page is open
@@ -96,9 +97,10 @@ fun App(vm: AppVM) {
     val reward = vm.celebration
     val running = Live.snap.active || live != null
     val run = runId?.let { id -> e.runs.firstOrNull { it.id == id } }
-    val chrome = !guide && reward == null && form == null && lesson == null && !running && more == null && run == null
+    val chrome = sharing == null && !guide && reward == null && form == null && lesson == null && !running && more == null && run == null
     BackHandler(enabled = !chrome && !(guide && !vm.settings.onboarded) && !Live.snap.active) {
         when {
+            sharing != null -> sharing = null
             guide -> rerunGuide = false; live != null -> live = null; reward != null -> vm.celebration = null; form != null -> form = null
             lesson != null -> lesson = null; run != null -> runId = null
             more == "menu" -> more = null; more == "privacy" || more == "licences" -> more = "about"; else -> more = "menu"
@@ -111,13 +113,14 @@ fun App(vm: AppVM) {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
                 Live.snap.active && reward == null && form == null -> LiveRunning(e, vm.settings.mapTiles)
                 running && reward == null && form == null -> Page(arrive = true) { LiveScreen(vm, e, live) { live = null } }
+                sharing != null -> Page(arrive = true) { SharePicker(vm, sharing!!) { sharing = null } }
                 reward != null -> Box {
-                    Page(arrive = true) { RewardScreen(reward, feel = vm.data.runs.firstOrNull { it.id == reward.run.id }?.feel ?: 0, rate = { vm.setFeel(reward.run.id, it) }, share = { vm.shareRun(reward) }) { vm.celebration = null; go(0) } }
+                    Page(arrive = true) { RewardScreen(reward, feel = vm.data.runs.firstOrNull { it.id == reward.run.id }?.feel ?: 0, rate = { vm.setFeel(reward.run.id, it) }, share = { sharing = reward.run }) { vm.celebration = null; go(0) } }
                     if (reward.celebrate) Confetti()
                 }
                 form != null -> Page(arrive = true) { RunForm(vm, e, form!!) { form = null } }
                 lesson != null -> Page(arrive = true) { LessonScreen(lesson!!, already = lesson!!.id in vm.settings.lessonsDone, close = { lesson = null }) { vm.finishLesson(lesson!!.id); lesson = null } }
-                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }, streets = vm.settings.mapTiles, addRoute = { vm.addRoute(run, it) }, share = { vm.shareRun(run) }) { runId = null } }
+                run != null -> Page(arrive = true) { RunPage(e, run, rate = { vm.setFeel(run.id, it) }, edit = { form = FormSeed(run = run) }, streets = vm.settings.mapTiles, addRoute = { vm.addRoute(run, it) }, share = { sharing = run }) { runId = null } }
                 more != null -> key(more) {
                     Page(arrive = true) { MoreScreen(vm, e, more!!, go = { more = it }, openLesson = { lesson = it }, replayIntro = { more = null; replayIntro = true }, rerunGuide = { more = null; rerunGuide = true }) }
                 }

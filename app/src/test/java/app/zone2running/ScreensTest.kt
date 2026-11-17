@@ -72,10 +72,20 @@ class ScreensTest {
         rule.onNodeWithText("${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)} · Easy run").performClick(); rule.waitForIdle()
         // Any logged run can be shared from its own page, and the card is drawn for that run.
         rule.onNodeWithText("Share").assertExists()
-        val old = vm.data.runs.minBy { it.date }
-        val before = Engine(vm.settings, vm.data.runs.filter { it.id != old.id }, today)
-        val oldCard = ShareCard.render(ApplicationProvider.getApplicationContext(), buildCelebration(before, vm.engine(), listOf(old)))
-        File("build/shots").mkdirs(); File("build/shots/share-card-old-run.png").outputStream().use { oldCard.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        rule.onNodeWithText("Share").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Share this run").assertExists(); rule.onNodeWithText("Use my own photo").assertExists(); shot("share-picker")
+        back()
+        // With a route and a photo: the route card draws the path, the photo card puts the numbers over the picture.
+        val ctx: android.content.Context = ApplicationProvider.getApplicationContext()
+        val looped = vm.data.runs.maxBy { it.distKm }.copy(route = (0 until 300).flatMap { i -> val a = 2 * Math.PI * i / 300
+            listOf(i * 10, ((20.0 + .0062 * kotlin.math.sin(a) + .0015 * kotlin.math.sin(3 * a)) * 1e5).toInt(), ((78.0 + .0085 * kotlin.math.cos(a) + .002 * kotlin.math.sin(2 * a)) * 1e5).toInt()) })
+        val photo = Bitmap.createBitmap(900, 1200, Bitmap.Config.ARGB_8888).also { b -> val c = android.graphics.Canvas(b)
+            c.drawRect(0f, 0f, 900f, 1200f, android.graphics.Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 900f, 1200f, 0xFF4E8FB8.toInt(), 0xFFE9B27A.toInt(), android.graphics.Shader.TileMode.CLAMP) })
+            c.drawCircle(450f, 520f, 190f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF4E3C8.toInt() }) }
+        File("build/shots/share-route.png").outputStream().use { ShareCard.render(ctx, looped, 2).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File("build/shots/share-photo.png").outputStream().use { ShareCard.render(ctx, looped, 3, photo).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertEquals(ShareCard.H, ShareCard.render(ctx, looped.copy(distKm = 128.4, durSec = 50000), 0).height)      // an ultra still draws
+        for (i in 0..1) File("build/shots/share-long-$i.png").outputStream().use { ShareCard.render(ctx, looped, i).compress(Bitmap.CompressFormat.PNG, 100, it) }
         rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists(); shot("run-page")
         rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
         rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()
@@ -270,11 +280,11 @@ class ScreensTest {
         rule.waitForIdle()
         assertEquals(1, vm.data.runs.size)
         shot("reward")
-        // The share picture is drawn from the same reward data.
-        val card = ShareCard.render(ApplicationProvider.getApplicationContext(), vm.celebration!!)
+        // The share pictures: four looks, three numbers each.
         File("build/shots").mkdirs()
-        File("build/shots/share-card.png").outputStream().use { card.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        assertEquals(1080, card.width)
+        val shared = vm.data.runs.first()
+        for (i in ShareCard.STYLES.indices) File("build/shots/share-$i.png").outputStream().use { ShareCard.render(ApplicationProvider.getApplicationContext(), shared, i).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertEquals(1080, ShareCard.W)
         rule.onNodeWithText("Done").performClick()
         rule.waitForIdle()
         // Reloading from disk gives back the same run and settings.

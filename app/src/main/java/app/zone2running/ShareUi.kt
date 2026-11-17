@@ -45,7 +45,7 @@ fun SharePicker(vm: AppVM, e: Engine, r: Run, close: () -> Unit) {
     val pager = rememberPagerState { ShareCard.STYLES.size }
     val zone: (Int) -> Int = remember(e) { { hr -> e.zoneOf(hr) } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) { photo = ShareCard.loadPhoto(ctx, uri); if (photo == null) vm.toast = "Couldn't open that picture" else if (pager.currentPage !in ShareCard.USES_PHOTO) scope.launch { pager.animateScrollToPage(5) } }
+        if (uri != null) { photo = ShareCard.loadPhoto(ctx, uri); if (photo == null) vm.toast = "Couldn't open that picture" else if (pager.currentPage < 5) scope.launch { pager.animateScrollToPage(6) } }
     }
     val choose = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     val style = pager.currentPage
@@ -56,20 +56,24 @@ fun SharePicker(vm: AppVM, e: Engine, r: Run, close: () -> Unit) {
         Pick("Story", story) { story = true }; Spacer(Modifier.width(6.dp)); Pick("Post", !story) { story = false }
     }
     HorizontalPager(pager, Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = if (story) 62.dp else 28.dp), pageSpacing = 14.dp) { i ->
-        val bmp = remember(r.id, i, photo, story, U.miles) { ShareCard.render(ctx, r, i, photo, story, .5f, zone) }
-        Box(Modifier.fillMaxWidth().aspectRatio(ShareCard.W / ShareCard.height(i, story).toFloat()).clip(RoundedCornerShape(20.dp))
+        // The look on screen plays its animation once when you land on it, so you can see what the video will do.
+        val play = remember(i, story, photo) { androidx.compose.animation.core.Animatable(1f) }
+        LaunchedEffect(pager.currentPage, story, photo) { if (pager.currentPage == i && Motion.on && ShareCard.canAnimate(i, photo != null)) { play.snapTo(0f); play.animateTo(1f, androidx.compose.animation.core.tween(3200, easing = androidx.compose.animation.core.LinearEasing)) } }
+        val step = (play.value * 48).toInt()
+        val bmp = remember(r.id, i, photo, story, U.miles, step) { ShareCard.render(ctx, r, i, photo, story, .4f, step / 48f, zone) }
+        Box(Modifier.fillMaxWidth().aspectRatio(ShareCard.W / ShareCard.height(i, story, photo != null).toFloat()).clip(RoundedCornerShape(20.dp))
             .then(if (i in ShareCard.USES_PHOTO && photo == null) Modifier.clickable(onClick = choose) else Modifier)) {
-            if (i == ShareCard.OVERLAY) Checker(Modifier.fillMaxSize())           // shows that the overlay really has nothing behind it
+            if (i == ShareCard.STAMP && photo == null) Checker(Modifier.fillMaxSize())           // shows that the sticker really has nothing behind it
             Image(bmp.asImageBitmap(), ShareCard.STYLES[i], Modifier.fillMaxSize())
         }
     }
     // Every look as a thumbnail: tap to jump to it.
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ShareCard.STYLES.indices.forEach { i ->
-            val thumb = remember(r.id, i, photo, U.miles) { ShareCard.render(ctx, r, i, photo, false, .12f, zone) }
+            val thumb = remember(r.id, i, photo, U.miles) { ShareCard.render(ctx, r, i, photo, false, .12f, 1f, zone) }
             Column(Modifier.width(62.dp).clickable { scope.launch { pager.animateScrollToPage(i) } }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Box(Modifier.size(62.dp, 78.dp).clip(RoundedCornerShape(8.dp)).border(2.dp, if (style == i) p.accent else Color.Transparent, RoundedCornerShape(8.dp)).padding(3.dp).clip(RoundedCornerShape(6.dp)).background(p.surface2)) {
-                    if (i == ShareCard.OVERLAY) Checker(Modifier.fillMaxSize())
+                    if (i == ShareCard.STAMP && photo == null) Checker(Modifier.fillMaxSize())
                     Image(thumb.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                 }
                 Small(ShareCard.STYLES[i], if (style == i) p.ink else p.muted)
@@ -80,17 +84,33 @@ fun SharePicker(vm: AppVM, e: Engine, r: Run, close: () -> Unit) {
         style == 0 -> "Your heart rate wound once round a circle, coloured by zone. No two runs draw the same one."
         style == 1 -> "Your run as ranges of hills, start in the distance and finish up close. Height is heart rate, colour is zone."
         style == 2 -> "The path you ran. Runs without a recorded route show the heart-rate line."
-        style == ShareCard.OVERLAY -> "Nothing behind it. Save it, then in an Instagram story tap the sticker icon, choose the photo sticker and pick it: it sits on top of your own photo or video."
+        style == ShareCard.STAMP && photo == null -> "A see-through sticker. Save it, then in an Instagram story tap the sticker icon, choose the photo sticker and pick it. Or add a photo here and it is stamped on for you."
+        style == ShareCard.STAMP -> "Stamped on your photo."
         style in ShareCard.USES_PHOTO && photo == null -> "This look needs a photo of yours."
-        style == 5 -> "Your photo shows only through the numbers."
-        style == 6 -> "Your photo, remade in two inks."
+        style == 5 -> if (photo == null) "A picture shows only through the numbers. Add your own photo to see it through them." else "Your photo shows only through the numbers."
+        style == 6 -> "Your photo as a magazine cover, with the distance as the masthead."
+        style == 7 -> "Your photo untouched, with the numbers on a pane of frosted glass."
+        style == 3 -> "The sun comes up as the video plays."
+        style == 4 -> "A lap of the track."
         else -> ""
     }, align = TextAlign.Center, modifier = Modifier.fillMaxWidth())
     val needsPhoto = style in ShareCard.USES_PHOTO && photo == null
-    BigBtn(if (needsPhoto) "Choose a photo" else "Share", if (needsPhoto) null else "play") { if (needsPhoto) choose() else vm.shareRun(r, style, photo, story) }
+    val video = ShareCard.canAnimate(style, photo != null)
+    val making = vm.videoProgress
+    if (making != null) {
+        // Making the video takes a few seconds: say so, and how far along it is.
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Meter(making); Small("Making the video… ${(making * 100).toInt()}%", align = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+    } else if (needsPhoto) BigBtn("Choose a photo") { choose() }
+    else {
+        if (video) BigBtn("Share as video", "play") { vm.shareVideo(r, style, photo, story, save = false) }
+        BigBtn("Share as picture", ghost = video) { vm.shareRun(r, style, photo, story) }
+    }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-        if (!needsPhoto) TextLink("Save to gallery") { vm.saveShare(r, style, photo, story) }
-        TextLink(if (photo == null) "Use my own photo" else "Change the photo") { choose() }
+        if (!needsPhoto && making == null) {
+            if (video) TextLink("Save video") { vm.shareVideo(r, style, photo, story, save = true) }
+            TextLink("Save picture") { vm.saveShare(r, style, photo, story) }
+        }
+        TextLink(if (photo == null) "Add my photo" else "Change photo") { choose() }
     }
 }
 

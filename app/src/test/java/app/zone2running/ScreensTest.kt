@@ -73,26 +73,39 @@ class ScreensTest {
         // Any logged run can be shared from its own page, and the card is drawn for that run.
         rule.onNodeWithText("Share").assertExists()
         rule.onNodeWithText("Share").performClick(); rule.waitForIdle()
-        rule.onNodeWithText("Share this run").assertExists(); rule.onNodeWithText("Use my own photo").assertExists(); shot("share-picker")
+        rule.onNodeWithText("Share this run").assertExists(); rule.onNodeWithText("Add my photo").assertExists(); rule.onNodeWithText("Share as video").assertExists(); shot("share-picker")
         back()
         // With a route and a photo: the route card draws the path, the photo card puts the numbers over the picture.
         val ctx: android.content.Context = ApplicationProvider.getApplicationContext()
         val looped = vm.data.runs.maxBy { it.distKm }.copy(route = (0 until 300).flatMap { i -> val a = 2 * Math.PI * i / 300
             listOf(i * 10, ((20.0 + .0062 * kotlin.math.sin(a) + .0015 * kotlin.math.sin(3 * a)) * 1e5).toInt(), ((78.0 + .0085 * kotlin.math.cos(a) + .002 * kotlin.math.sin(2 * a)) * 1e5).toInt()) })
-        val photo = Bitmap.createBitmap(900, 1200, Bitmap.Config.ARGB_8888).also { b -> val c = android.graphics.Canvas(b)
-            c.drawRect(0f, 0f, 900f, 1200f, android.graphics.Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 900f, 1200f, 0xFF4E8FB8.toInt(), 0xFFE9B27A.toInt(), android.graphics.Shader.TileMode.CLAMP) })
-            c.drawCircle(450f, 520f, 190f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF4E3C8.toInt() }) }
+        // A stand-in for a runner's photo: evening sky, a low sun, a road between dark hills.
+        val photo = Bitmap.createBitmap(900, 1600, Bitmap.Config.ARGB_8888).also { b -> val c = android.graphics.Canvas(b); val P = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            c.drawRect(0f, 0f, 900f, 1600f, android.graphics.Paint().apply { shader = android.graphics.LinearGradient(0f, 0f, 0f, 1000f, intArrayOf(0xFF2B4C7E.toInt(), 0xFF8FA9C9.toInt(), 0xFFF2B98A.toInt()), null, android.graphics.Shader.TileMode.CLAMP) })
+            c.drawCircle(600f, 860f, 90f, P.apply { color = 0xFFFFE7B8.toInt() })
+            fun hill(col: Long, pts: List<Float>) { val pa = android.graphics.Path(); pa.moveTo(0f, 1600f); pts.chunked(2).forEach { pa.lineTo(it[0], it[1]) }; pa.lineTo(900f, 1600f); pa.close(); c.drawPath(pa, P.apply { color = col.toInt() }) }
+            hill(0xFF5E6F8C, listOf(0f, 900f, 200f, 760f, 380f, 880f, 560f, 800f, 760f, 900f, 900f, 840f))
+            hill(0xFF36475C, listOf(0f, 1010f, 260f, 930f, 520f, 1020f, 900f, 950f))
+            hill(0xFF2A3A2E, listOf(0f, 1120f, 900f, 1090f))
+            hill(0xFF6A6F73, listOf(330f, 1600f, 430f, 1100f, 470f, 1100f, 620f, 1600f)) }
         val traced = looped.copy(trace = List(540) { i -> val x = i / 540.0
             (118 + 34 * kotlin.math.min(1.0, x * 6) + 10 * kotlin.math.sin(x * 21) + 7 * kotlin.math.sin(x * 57) + 16 * x + (if (x > .55 && x < .7) 14 else 0)).toInt() })
         val e2 = vm.engine()
         for (story in listOf(true, false)) for (i in ShareCard.STYLES.indices) {
-            val b = ShareCard.render(ctx, traced, i, photo, story, 1f) { e2.zoneOf(it) }
+            val b = ShareCard.render(ctx, traced, i, photo, story, 1f, 1f) { e2.zoneOf(it) }
             assertEquals(ShareCard.height(i, story), b.height)
+            // Frames of the animated version: part-way through, at video size, with even sides.
+            val mid = ShareCard.render(ctx, traced, i, photo, story, 2 / 3f, .45f) { e2.zoneOf(it) }
+            assertEquals(720, mid.width); assertEquals(0, mid.height % 2)
+            if (story) File("build/shots/share-mid-$i.png").outputStream().use { mid.compress(Bitmap.CompressFormat.PNG, 100, it) }
             File("build/shots/share-${if (story) "story" else "post"}-$i.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         // A run with no trace, route or photo still draws every look; an ultra still fits.
         for (i in ShareCard.STYLES.indices) assertEquals(1080, ShareCard.render(ctx, looped.copy(route = emptyList(), distKm = 128.4, durSec = 50000), i).width)
-        assertEquals(0, ShareCard.render(ctx, traced, ShareCard.OVERLAY).getPixel(5, 5) ushr 24)             // the overlay's corner is fully see-through
+        val sticker = ShareCard.render(ctx, traced, ShareCard.STAMP)
+        assertEquals(1080, sticker.height); assertEquals(0, sticker.getPixel(5, 5) ushr 24)                  // the sticker's corner is fully see-through
+        File("build/shots/share-sticker.png").outputStream().use { sticker.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue(!ShareCard.canAnimate(ShareCard.STAMP, false)); assertTrue(ShareCard.canAnimate(ShareCard.STAMP, true)); assertTrue(!ShareCard.canAnimate(6, false))
         rule.onNodeWithText("WHAT THIS RUN SAYS").assertExists(); shot("run-page")
         rule.onNodeWithText("Edit").performClick(); rule.waitForIdle(); rule.onNodeWithText("Edit run").assertExists()
         rule.onNodeWithText("Cancel").performScrollTo().performClick(); rule.waitForIdle()

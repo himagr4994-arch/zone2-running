@@ -169,4 +169,44 @@ tap("Pause")
 tap("Discard this run")
 expect("Plan", "after discarding the free run")
 shot("after-free-run")
+# Log a run by hand, then make its share picture and its animated video and pull both off the emulator.
+tap("Log it instead")
+for label, value in [("Distance", "6.2"), ("Time", "41:30"), ("Average HR", "141")]:
+    tap(label)
+    adb("shell", "input", "text", value)
+    time.sleep(.6)
+adb("shell", "input", "keyevent", "4")          # close the keyboard
+time.sleep(1)
+if not tap("Save run", must=False):
+    adb("shell", "input", "swipe", "500", "1500", "500", "700", "300"); time.sleep(1); tap("Save run")
+expect("Share", "on the screen after logging a run")
+shot("logged")
+tap("Share")
+expect("Share this run", "on the share screen")
+time.sleep(4)
+shot("share-picker")
+tap("Save picture")
+time.sleep(4)
+alive("after saving the picture")
+tap("Save video")
+video = ""
+for i in range(120):                              # a software encoder on a slow emulator can take a couple of minutes
+    video = adb("shell", "ls", "/sdcard/Movies/Zone 2 Running/").strip()
+    if video.endswith(".mp4") and "No such" not in video:
+        break
+    alive("while making the video")
+    time.sleep(3)
+else:
+    fail(f"no video appeared. On screen: {texts()[:30]}")
+time.sleep(3)
+adb("pull", f"/sdcard/Movies/Zone 2 Running/{video.splitlines()[0]}", f"shots/{name}-video.mp4")
+for pic in adb("shell", "ls", "/sdcard/Pictures/Zone 2 Running/").split("\n"):
+    if pic.strip().endswith(".png"):
+        adb("pull", f"/sdcard/Pictures/Zone 2 Running/{pic.strip()}", f"shots/{name}-picture.png")
+size = os.path.getsize(f"shots/{name}-video.mp4") if os.path.exists(f"shots/{name}-video.mp4") else 0
+if size < 20000:
+    fail(f"the video is only {size} bytes")
+print(f"[{name}] video made: {size} bytes")
+alive("after making the video")
+shot("video-done")
 print(f"[{name}] PASSED")

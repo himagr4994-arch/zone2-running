@@ -222,10 +222,29 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         try { ShareCard.share(getApplication(), r, style, photo, story) { e.zoneOf(it) } } catch (x: Exception) { toast = "Couldn't open sharing on this phone" }
     }
 
-    /** Saves the picture to the gallery, which is how the see-through overlay gets into Instagram as a sticker. */
+    /** Saves the picture to the gallery, which is how the see-through stamp gets into Instagram as a sticker. */
     fun saveShare(r: Run, style: Int, photo: android.graphics.Bitmap?, story: Boolean) {
         val e = engine()
         toast = try { if (ShareCard.save(getApplication(), r, style, photo, story) { e.zoneOf(it) }) "Saved to your gallery, in Zone 2 Running" else "Saving needs Android 10 or newer. Use Share." } catch (x: Exception) { "Couldn't save the picture" }
+    }
+
+    /** How far the video in the making has got, 0..1; null when none is being made. */
+    var videoProgress by mutableStateOf<Float?>(null); private set
+
+    /** Makes the animated version off the main thread, then shares it or saves it to the gallery. */
+    fun shareVideo(r: Run, style: Int, photo: android.graphics.Bitmap?, story: Boolean, save: Boolean) {
+        if (videoProgress != null) return
+        val e = engine(); val app = getApplication<android.app.Application>()
+        videoProgress = 0f
+        viewModelScope.launch {
+            val file = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ShareVideo.make(app, r, style, photo, story, { e.zoneOf(it) }) { videoProgress = it } } } catch (x: Exception) { null }
+            videoProgress = null
+            toast = when {
+                file == null || file.length() < 2000 -> "This phone couldn't make the video. The picture still works."
+                save -> try { if (ShareVideo.save(app, file, "zone2-${r.date}-${ShareCard.STYLES[style].lowercase()}-${System.currentTimeMillis() / 1000}")) "Video saved to your gallery, in Zone 2 Running" else "Saving needs Android 10 or newer. Use Share." } catch (x: Exception) { "Couldn't save the video" }
+                else -> try { ShareVideo.share(app, file); null } catch (x: Exception) { "Couldn't open sharing on this phone" }
+            }
+        }
     }
 
     /** Applies a suggestion the runner agreed to. */

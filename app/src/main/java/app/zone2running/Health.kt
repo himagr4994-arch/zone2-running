@@ -97,9 +97,12 @@ class Health(private val ctx: Context) {
                     Split((b - a).toInt(), if (hr.isEmpty()) 0 else hr.average().roundToInt())
                 } ?: emptyList()
                 val cadence = (steps * 60.0 / dur).roundToInt().takeIf { it in 120..230 } ?: 0      // anything else is not a running step count
+                // The source's own average can be well off when it logs readings unevenly; a full trace is the better number.
+                val grid = traceFrom(beats, dur)
+                val avgTrue = grid.filter { it > 0 }.takeIf { it.size >= 30 && it.size * TRACE_STEP >= dur * .8 }?.average()?.roundToInt() ?: avg
                 out += Run(
                     id = "hc_" + sx.metadata.id, date = sx.startTime.atOffset(offset).toLocalDate(), type = typeOf(dur, avg),
-                    distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avg, maxHr = max,
+                    distKm = (km * 100).roundToInt() / 100.0, durSec = dur, avgHr = avgTrue, maxHr = max,
                     notes = sx.title ?: "", source = "health", zoneSec = zoneSeconds(range, sx.metadata.dataOrigin, zoneOf),
                     splits = splits(range, sx.metadata.dataOrigin, sx.startTime).ifEmpty { lapSplits }.ifEmpty { splitsFromPace(paceGrid, traceFrom(beats, dur), km) },
                     route = route,

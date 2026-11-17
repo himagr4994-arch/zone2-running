@@ -582,4 +582,56 @@ class EngineTest {
         assertTrue((1..1670).flatMap { tr.tick(if (it > 600) 170 else 130) }.none { it.kind == "cap" })
         assertEquals("full sentences", Engine(s.copy(hrMeds = true), emptyList(), today).target(iv[0]))
     }
+
+    // ---- from a real talk test on a phone ----
+
+    /** A talk test as the app records it: ten easy minutes, six three-minute stages, five to cool down. */
+    private fun talkRun(e: Engine): Run {
+        val hr = listOf(141, 144, 148, 154, 160, 169); val pace = listOf(510, 511, 502, 455, 426, 359)
+        val tr = ArrayList<Int>(); val pc = ArrayList<Int>()
+        repeat(60) { tr += 137; pc += 506 }
+        for (i in 0 until 6) repeat(18) { j -> tr += hr[i] - (if (j < 6) 4 else 0); pc += pace[i] }      // heart rate lags a minute behind each step up
+        repeat(30) { tr += 145 - it; pc += 570 }
+        return Run("talk", today, "tempo", 4.01, 1980, 146, 175, source = "live", trace = tr, pace = pc, kind = "talk", steps = e.steps(Session("tempo", "Talk test", 35, "", "talk")),
+            zoneSec = listOf(291, 977, 431, 264, 20))
+    }
+
+    @Test fun talkTestGivesADirectReadingAndItsOwnVerdict() {
+        val set = s.copy(maxHr = 186, restHr = 66, talkHr = 155)
+        val e0 = Engine(set, emptyList(), today); val r = talkRun(e0)
+        val e = Engine(set, listOf(r), today)
+        assertEquals(147, e.refHr)
+        assertEquals(6, e.talkStages(r).size); assertEquals(141, e.talkStages(r)[0].first)
+        // 147 bpm sits between the 144 and 148 stages: the pace is read off between them, not scaled from anywhere.
+        val est = e.estOf(r)!!; assertTrue(est.clean); assertTrue("${est.pace}", est.pace in 500.0..512.0)
+        val d = e.debrief(r)
+        assertEquals("Talk test done", d.head)
+        assertTrue(d.learned.any { it.text.contains("141, 144, 148, 154, 160, 169") })
+        assertTrue(d.learned.any { it.text.contains("Your ceiling is set at 155") && it.text.contains("6 beats wider") })
+        assertTrue(d.learned.any { it.text.contains("Even steps") })                    // stages 1 to 3 were almost the same pace
+        assertTrue(d.learned.none { it.text.contains("doesn't count as Zone 2") || it.text.contains("higher in the second half") })
+        assertTrue(d.next.contains("under 156 bpm"))
+        // Zone time follows the zones as they are now, not as they were when the run was saved.
+        val now = e.zoneSecOf(r); val before = Engine(set.copy(talkHr = 0), listOf(r), today).zoneSecOf(r)
+        assertEquals(1980, now.sum()); assertTrue(now[1] > before[1])
+    }
+
+    @Test fun twoDirectReadingsOutvoteScaledHardRuns() {
+        val set = s.copy(maxHr = 186, restHr = 66, talkHr = 155)
+        val r = talkRun(Engine(set, emptyList(), today))
+        val hardRuns = (1L..5L).map { Run("h$it", today.minusDays(it * 3), "hard", 7.0, 2940, 165) }     // 7:00/km at 165: scales to about 8:33, or worse, wildly off
+        val easy = Run("e", today.minusDays(20), "easy", 5.5, 2700, 147)                                  // 8:11/km right at the reference
+        val e = Engine(set, hardRuns + easy + r, today)
+        assertTrue(e.reading()!!.clean); assertEquals(2, e.reading()!!.n)
+        assertTrue(e.current!! in 495.0..505.0)                                         // between the two direct readings
+        assertEquals(1, e.confidence()!!.level)
+    }
+
+    @Test fun aTraceOverrulesASourcesOwnAverage() {
+        val tr = List(186) { if (it < 20) 112 + it * 2 else 163 }
+        val r = Run("x", today, "easy", 4.34, 1857, 140, 171, source = "health", trace = tr)
+        assertEquals(160, trueAvg(r)); assertEquals(163, steady(r)!!.second)
+        assertEquals(140, trueAvg(r.copy(trace = tr.take(40))))                         // a trace covering a fraction of the run isn't trusted
+        assertTrue(!Engine(s, listOf(r), today).estOf(r)!!.clean)                       // at 163 it is no longer mistaken for an easy run
+    }
 }

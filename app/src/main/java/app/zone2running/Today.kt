@@ -153,7 +153,7 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
             }
         }
         e.runs.lastOrNull()?.let { r ->
-            val easyShare = r.zoneSec.takeIf { it.size == 5 && it.sum() > 0 }?.let { " · ${((it[0] + it[1]) * 100f / it.sum()).roundToInt()}% in Zone 2" } ?: ""
+            val easyShare = e.zoneSecOf(r).takeIf { it.size == 5 && it.sum() > 0 }?.let { " · ${((it[0] + it[1]) * 100f / it.sum()).roundToInt()}% in Zone 2" } ?: ""
             Link("road", if (r.date == e.today) "Today's run" else "Last run · ${DOW[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)}", "${U.dist(r.distKm)} · ${fmtPace(paceOf(r))} ${U.per}$easyShare") { openRun(r) }
         }
         e.review()?.takeIf { e.today.dayOfWeek.value <= 2 }?.let { rv ->

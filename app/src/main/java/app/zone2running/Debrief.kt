@@ -47,28 +47,29 @@ fun Engine.debrief(r: Run): Debrief {
     if (blocks.isNotEmpty() && r.durSec - t >= 120) seg(t, r.durSec).takeIf { it.isNotEmpty() }?.let { v ->
         blocks += BlockStat(Step("Extra running", r.durSec - t, 1, 2, "easy"), t, r.durSec, v.average().roundToInt(), v.max(), v.min(), v.first(), v.last(), v.count { it < cap } * 100 / v.size)
     }
+    val talk = steps.any { it.kind == "talk" }
     val hard = blocks.filter { it.step.kind == "hard" }
     val walks = blocks.filter { it.step.kind == "walk" }; val jogs = blocks.filter { it.step.kind == "easy" && walks.isNotEmpty() }
     val recov = blocks.filterIndexed { i, b -> i > 0 && blocks[i - 1].step.kind == "hard" && b.step.kind == "easy" }
 
     // ---- numbers
-    val zs = r.zoneSec.takeIf { it.size == 5 && it.sum() > 0 }
+    val zs = zoneSecOf(r).takeIf { it.size == 5 && it.sum() > 0 }
     val easyShare = zs?.let { (it[0] + it[1]) * 100 / it.sum() } ?: if (has) tr.filter { it > 0 }.let { v -> v.count { it < cap } * 100 / v.size } else null
     val minutes = zs?.sum()?.div(60) ?: (tr.count { it > 0 } * TRACE_STEP / 60)
     val easyMin = easyShare?.let { minutes * it / 100 }
     val interval = hard.isNotEmpty() || r.type == "intervals"
     val meantEasy = r.type in setOf("easy", "long", "test")
     // Drift: the second half against the first, leaving out the warm-up. With splits it is pace per beat; without, plain beats.
-    val body = if (has && !interval && walks.isEmpty() && r.durSec >= 1500) seg(480, r.durSec) else emptyList()
+    val body = if (has && !interval && walks.isEmpty() && !talk && r.durSec >= 1500) seg(480, r.durSec) else emptyList()
     val driftBpm = body.takeIf { it.size >= 60 }?.let { it.subList(it.size / 2, it.size).average() - it.subList(0, it.size / 2).average() }
     val sp = r.splits.drop(1).filter { it.hr > 0 }
-    val decouple = sp.takeIf { it.size >= 4 && !interval }?.let { s ->
+    val decouple = sp.takeIf { it.size >= 4 && !interval && !talk }?.let { s ->
         fun eff(x: List<Split>) = x.sumOf { 1000.0 / it.sec } / x.sumOf { it.hr.toDouble() }
         val a = eff(s.subList(0, s.size / 2)); val b = eff(s.subList(s.size / 2, s.size)); (a - b) / a * 100
     }
     val reachedZ2 = if (has) tr.indexOfFirst { it >= zb[1] }.takeIf { it >= 0 }?.times(TRACE_STEP) else null
     // The moment heart rate went above the cap and stayed there for three minutes.
-    val leftAt = if (has && !interval) (0..tr.size - 18).firstOrNull { i -> tr.subList(i, i + 18).all { it >= cap } }?.times(TRACE_STEP) else null
+    val leftAt = if (has && !interval && !talk) (0..tr.size - 18).firstOrNull { i -> tr.subList(i, i + 18).all { it >= cap } }?.times(TRACE_STEP) else null
     var run = 0; var longest = 0
     for (v in tr) { if (v in 1 until cap) { run++; if (run > longest) longest = run } else run = 0 }
     val peakAt = if (has) tr.indexOf(tr.max()) * TRACE_STEP else null
@@ -101,6 +102,28 @@ fun Engine.debrief(r: Run): Debrief {
     val head: String; var next: String
     val easyPace = easyRange()?.let { " At today's fitness that is around ${fmtPace(it.first)}–${fmtPace(it.second)} ${U.per}." } ?: ""
     when {
+        talk -> {
+            // A talk test climbs on purpose: judging it as an easy run or a hard one would miss the point.
+            head = "Talk test done"
+            val st = talkStages(r)
+            if (st.size >= 3) {
+                learned += Note("plain", "Stage by stage your heart rate went ${st.joinToString(", ") { "${it.first}" }} bpm as the pace went from ${fmtPace(st.first().second)} to ${fmtPace(st.last().second)} ${U.per}.")
+                val formula = Engine(s.copy(talkHr = 0), emptyList(), today).zb[2] - 1
+                if (s.talkHr > 0) {
+                    val at = st.minBy { kotlin.math.abs(it.first - s.talkHr) }
+                    learned += Note("good", "Your ceiling is set at ${s.talkHr} bpm, which you reached at about ${fmtPace(at.second)} ${U.per}. " + when {
+                        s.talkHr - formula >= 3 -> "The formula had it at $formula, so your Zone 2 is ${s.talkHr - formula} beats wider than it assumed."
+                        formula - s.talkHr >= 3 -> "The formula had it at $formula, so your real Zone 2 tops out ${formula - s.talkHr} beats lower."
+                        else -> "That is where the formula put it too."
+                    })
+                } else learned += Note("plain", "Enter the heart rate of the last stage where talking was still comfortable and it becomes the top of your Zone 2.")
+                // Stages that barely differ can't separate one heart rate from the next.
+                val gaps = st.zipWithNext { a, b -> a.second - b.second }
+                val flat = gaps.count { it < 15 }; val jump = gaps.maxOrNull() ?: 0.0
+                if (flat >= 2 && jump >= 30) learned += Note("plain", "$flat of the steps between stages changed the pace by under ${U.s(15)} seconds, and one jumped ${U.s(jump.roundToInt())}. Even steps of about ${U.s(20)} seconds next time would pin the ceiling down more closely.")
+            }
+            next = "Next run: easy, under ${zb[2]} bpm." + (easyRange()?.let { " Going by today that is around ${fmtPace(it.first)}–${fmtPace(it.second)} ${U.per}." } ?: "")
+        }
         interval -> {
             head = "Intervals done"
             if (hard.size >= 2) {
@@ -135,7 +158,7 @@ fun Engine.debrief(r: Run): Debrief {
             next = "Next run: properly easy, under $cap bpm.$easyPace"
         }
     }
-    if (!interval && walks.isEmpty()) {
+    if (!interval && walks.isEmpty() && !talk) {
         if (decouple != null) learned += Note(if (decouple < 5) "good" else "plain", if (decouple < 5) "Pace per heartbeat held to the end (${f1(abs(decouple))}% change). Your endurance covers this distance." else "Pace per heartbeat faded ${f1(decouple)}% in the second half. That's drift: heat, fluid, or a pace slightly too quick for this length.")
         else driftBpm?.let { d -> if (d >= 8) learned += Note("plain", "Heart rate was ${d.roundToInt()} bpm higher in the second half than the first. Some drift is normal; this much means the pace or the heat was costing you.") else if (d <= 4 && meantEasy) learned += Note("good", "Heart rate barely moved from the first half to the second (${d.roundToInt()} bpm). Steady.") }
     }

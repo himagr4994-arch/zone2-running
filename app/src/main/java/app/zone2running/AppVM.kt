@@ -79,7 +79,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     val settings get() = data.settings
     fun engine() = Engine(data.settings, data.runs, LocalDate.now(), if (data.settings.weatherOn) weather else null)
 
-    init { U.miles = data.settings.miles }
+    init {
+        U.miles = data.settings.miles
+        // Imported runs whose stored average disagrees with their own heart-rate trace are put right, once.
+        val fixed = data.runs.map { r -> if (r.source == "health") trueAvg(r).let { a -> if (kotlin.math.abs(a - r.avgHr) >= 3) r.copy(avgHr = a, type = if (r.type in setOf("easy", "tempo", "hard")) Engine(data.settings, emptyList(), LocalDate.now()).guessType(r.durSec, a) else r.type) else r } else r }
+        if (fixed != data.runs) { data = data.copy(runs = fixed); store.save(data) }
+    }
 
     private fun commit(d: AppData) {
         var nd = d
@@ -237,7 +242,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         val e = engine(); val app = getApplication<android.app.Application>()
         videoProgress = 0f
         viewModelScope.launch {
-            val file = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ShareVideo.make(app, r, style, photo, story, { e.zoneOf(it) }) { videoProgress = it } } } catch (x: Exception) { null }
+            val file = try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ShareVideo.make(app, r, style, photo, story, { e.zoneOf(it) }) { videoProgress = it } } } catch (x: Exception) { android.util.Log.w("Zone2", "video failed", x); null }
             videoProgress = null
             toast = when {
                 file == null || file.length() < 2000 -> "This phone couldn't make the video. The picture still works."

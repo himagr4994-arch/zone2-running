@@ -241,8 +241,22 @@ fun steady(r: Run): Pair<Double, Int>? {
     if (r.avgHr <= 0 || r.distKm <= 0 || r.durSec <= 0) return null
     var t = 0; var sec = 0; var beats = 0L; var n = 0
     for (sp in r.splits) { val start = t; t += sp.sec; if (start >= 480 && t <= 2520 && sp.hr > 0 && sp.sec > 0) { sec += sp.sec; beats += sp.hr.toLong() * sp.sec; n++ } }
-    return if (n >= 2) sec.toDouble() / n to (beats / sec).toInt() else paceOf(r) to r.avgHr
+    // Where there is a heart-rate trace, the same window of it is the truest heart rate for the steady part.
+    val traced = traceHr(r, 480, 2520)
+    return if (n >= 2) sec.toDouble() / n to (traced ?: (beats / sec).toInt()) else paceOf(r) to (traced ?: trueAvg(r))
 }
+
+/** Mean heart rate over part of a run, from its trace; null without at least two minutes of readings there. */
+fun traceHr(r: Run, fromSec: Int = 0, toSec: Int = Int.MAX_VALUE): Int? {
+    val v = r.trace.filterIndexed { i, hr -> hr > 0 && i * TRACE_STEP >= fromSec && i * TRACE_STEP < toSec }
+    return if (v.size >= 12) v.average().roundToInt() else null
+}
+
+/**
+ * A run's average heart rate. A source's own "average" can be far off when it logs readings unevenly, so a
+ * trace that covers most of the run is trusted over it.
+ */
+fun trueAvg(r: Run): Int = r.trace.filter { it > 0 }.takeIf { it.size >= 30 && it.size * TRACE_STEP >= r.durSec * .8 }?.average()?.roundToInt() ?: r.avgHr
 
 /**
  * How much heat slows a run, in percent, from the sum of temperature and dew point in °F.
@@ -298,6 +312,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
      */
     fun estOf(r: Run): Est? {
         if (r.type == "intervals") return null
+        talkReading(r)?.let { return Est(r, it / (1 + r.heatPct / 100), true) }
         val (pace, hr) = steady(r) ?: return null
         val d = refHr - s.restHr
         if (hr - s.restHr < 25 || d < 15) return null
@@ -306,6 +321,47 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         return Est(r, p, clean)
     }
     fun est(r: Run): Double? = estOf(r)?.pace
+
+    /** Each stage of a talk test as (heart rate, pace), read from its last two minutes, once the heart has caught up with the legs. */
+    fun talkStages(r: Run): List<Pair<Int, Double>> {
+        val out = ArrayList<Pair<Int, Double>>(); var t = 0
+        for (st in r.steps) {
+            val end = t + st.sec
+            if (st.kind == "talk" && end <= r.durSec + 30) {
+                val from = (t + minOf(60, st.sec / 3)) / TRACE_STEP; val to = minOf(end / TRACE_STEP, r.trace.size, r.pace.size)
+                if (to - from >= 6) {
+                    val hr = r.trace.subList(from, to).filter { it > 0 }; val sp = r.pace.subList(from, to).filter { it > 0 }
+                    if (hr.size >= 6 && sp.size >= 6) out += hr.average().roundToInt() to 1000 / sp.map { 1000.0 / it }.average()
+                }
+            }
+            t = end
+        }
+        return out
+    }
+
+    /**
+     * A talk test steps through heart rates on purpose, so it measures pace against heart rate directly.
+     * The pace at the reference heart rate is read off between the two stages either side of it: no scaling needed.
+     */
+    private fun talkReading(r: Run): Double? {
+        val st = talkStages(r).sortedBy { it.first }
+        if (st.size < 3) return null
+        val below = st.lastOrNull { it.first <= refHr }; val above = st.firstOrNull { it.first >= refHr }
+        return when {
+            below != null && above != null -> if (above.first == below.first) below.second else below.second + (above.second - below.second) * (refHr - below.first) / (above.first - below.first).toDouble()
+            below != null && refHr - below.first <= 6 -> below.second
+            above != null && above.first - refHr <= 6 -> above.second
+            else -> null
+        }
+    }
+
+    /** Seconds in each zone, counted from the trace with the zones as they are now, so a talk test or a new max re-sorts old runs too. */
+    fun zoneSecOf(r: Run): List<Int> {
+        val v = r.trace.filter { it > 0 }
+        if (v.size < 30) return r.zoneSec
+        val out = IntArray(5); for (hr in v) out[zoneOf(hr) - 1] += TRACE_STEP
+        return out.toList()
+    }
 
     private val basePoint: Run? = if (s.basePace > 0 && s.baseHr > 0 && s.baseDate != null)
         Run("_base", s.baseDate, "baseline", 1.0, s.basePace, s.baseHr) else null
@@ -322,8 +378,9 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         val all = ests.filter { !it.run.date.isAfter(asOf) }
         if (all.isEmpty()) return null
         val clean = all.filter { it.clean && ChronoUnit.DAYS.between(it.run.date, asOf) <= 42 }.takeLast(8)
-        val v = (if (clean.size >= 3) clean else all.takeLast(5)).map { it.pace }.sorted()
-        return Reading(median(v), quantile(v, .25), quantile(v, .75), v.size, clean.size >= 3)
+        // Two direct readings beat any number of hard runs scaled down: scaling across 15 beats or more can be a minute a kilometre out.
+        val v = (if (clean.size >= 2) clean else all.takeLast(5)).map { it.pace }.sorted()
+        return Reading(median(v), quantile(v, .25), quantile(v, .75), v.size, clean.size >= 2)
     }
     private val now: Reading? = reading()
     val current: Double? = now?.pace
@@ -340,7 +397,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     }
     /** Was this run meant to be easy? Imported runs are labelled by heart rate, so for those the weekday decides. */
     private fun meantEasy(r: Run) = r.type in setOf("easy", "long") || (r.source == "health" && r.type in setOf("tempo", "hard") && r.date.dayOfWeek.value != qualityDay)
-    private fun overCeiling(r: Run) = if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) r.zoneSec.drop(2).sum() * 10 >= r.zoneSec.sum() * 4 else r.avgHr >= zb[2]
+    private fun overCeiling(r: Run) = zoneSecOf(r).let { z -> if (z.size == 5 && z.sum() > 0) z.drop(2).sum() * 10 >= z.sum() * 4 else r.avgHr >= zb[2] }
     private val easyRecent: List<Run> = runs.filter { meantEasy(it) && it.avgHr > 0 && it.heatPct < 1.5 && it.durSec >= 900 && ChronoUnit.DAYS.between(it.date, today) in 0..27 }.takeLast(5)
 
     /**
@@ -365,7 +422,8 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         var easy = 0.0; var hard = 0.0; var km = 0.0; var n = 0
         for (r in runs) if (!r.date.isBefore(from) && r.date.isBefore(to)) {
             n++; km += r.distKm
-            if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) { easy += (r.zoneSec[0] + r.zoneSec[1]) / 60.0; hard += r.zoneSec.drop(2).sum() / 60.0 }
+            val z = zoneSecOf(r)
+            if (z.size == 5 && z.sum() > 0) { easy += (z[0] + z[1]) / 60.0; hard += z.drop(2).sum() / 60.0 }
             else if (isEasy(r)) easy += r.durSec / 60.0 else hard += r.durSec / 60.0
         }
         return Span(easy, hard, km, n)
@@ -846,7 +904,7 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         val test = runs.any { it.type == "test" && ChronoUnit.DAYS.between(it.date, today) in 0..35 }
         val clean = ests.count { it.clean && ChronoUnit.DAYS.between(it.run.date, today) <= 42 }
         return when {
-            n.clean && (n.n >= 5 || test) -> Confidence(2, "Solid estimate", "The middle of ${n.n} steady easy runs.")
+            n.clean && (n.n >= 4 || test) -> Confidence(2, "Solid estimate", "The middle of ${n.n} direct readings.")
             n.clean || clean >= 1 -> Confidence(1, "Fair estimate", "Sharpens with a few more steady easy runs or a Zone 2 test.")
             else -> Confidence(0, "Rough estimate", "Worked out from harder runs. Three steady runs near $refHr bpm will firm it up.")
         }

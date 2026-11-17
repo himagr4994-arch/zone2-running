@@ -127,11 +127,12 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: B
         if (d.planned) Small("Blocks are laid over from the day's plan, assuming you started the session when the run began.")
     }
 
-    if (r.zoneSec.size == 5 && r.zoneSec.sum() > 0) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val tot = r.zoneSec.sum()
+    val zs = remember(r, e) { e.zoneSecOf(r) }
+    if (zs.size == 5 && zs.sum() > 0) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val tot = zs.sum()
         Label("Time in zones")
-        ZoneBar(r.zoneSec)
-        ZoneRows(e, r.zoneSec)
+        ZoneBar(zs)
+        ZoneRows(e, zs)
         if (tot < r.durSec * .8) Small("Heart rate was recorded for ${tot / 60} of ${r.durSec / 60} minutes.")
     }
     if (r.splits.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Label("${U.word.replaceFirstChar { it.uppercase() }} splits"); SplitBars(r.splits) }

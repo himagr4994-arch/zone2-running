@@ -207,12 +207,13 @@ alive("after saving the picture")
 tap("Save video")
 video = ""
 for i in range(120):                              # a software encoder on a slow emulator can take a couple of minutes
-    video = adb("shell", "ls", "/sdcard/Movies/Zone 2 Running/").strip()
+    video = adb("shell", "ls '/sdcard/Movies/Zone 2 Running/' 2>&1").strip()
     if video.endswith(".mp4") and "No such" not in video:
         break
     alive("while making the video")
     time.sleep(3)
 else:
+    print(adb("logcat", "-d", "-s", "Zone2:W")[-3000:])
     fail(f"no video appeared. On screen: {texts()[:30]}")
 time.sleep(3)
 adb("pull", f"/sdcard/Movies/Zone 2 Running/{video.splitlines()[0]}", f"shots/{name}-video.mp4")

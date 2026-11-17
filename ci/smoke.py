@@ -75,6 +75,10 @@ def tap(label, last=False, must=True):
             fail(f"nothing to tap called '{label}'. On screen: {texts()[:40]}")
         return False
     _, x, y = hits[-1] if last else hits[0]
+    if y > SCREEN_H - 170:                        # reported under the system's own buttons: bring it up first, or the tap lands on Home
+        adb("shell", "input", "swipe", "500", "1500", "500", "800", "300"); time.sleep(1.2)
+        hits = find() or hits
+        _, x, y = hits[-1] if last else hits[0]
     adb("shell", "input", "tap", str(x), str(y))
     time.sleep(1.2)
     alive(f"after tapping '{label}'")
@@ -107,6 +111,7 @@ def fail(msg):
 
 time.sleep(20)          # let a freshly booted emulator settle
 adb("shell", "input", "keyevent", "82")
+SCREEN_H = int(re.search(r"(\d+)x(\d+)", adb("shell", "wm", "size")).group(2))
 adb("uninstall", PKG)
 adb("install", "-r", apk, check=True, timeout=300)
 for p in ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"]:

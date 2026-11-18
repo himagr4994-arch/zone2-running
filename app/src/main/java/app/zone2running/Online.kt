@@ -58,7 +58,24 @@ object Online {
     /** Newest release of the app, as (version, page to open), or null. Needs a public repository named in the build. */
     suspend fun latestRelease(): Pair<String, String>? = withContext(Dispatchers.IO) {
         if (BuildConfig.UPDATE_REPO.isBlank()) return@withContext null
-        try { JSONObject(get("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest")).let { it.getString("tag_name").trimStart('v') to it.getString("html_url") } } catch (e: Exception) { null }
+        (latest() as? Latest.Out)?.let { it.version to it.url }
+    }
+
+    /** Asks GitHub for the newest release and says plainly which of three things happened, so a manual check can report it. */
+    suspend fun latest(): Latest = withContext(Dispatchers.IO) {
+        if (BuildConfig.UPDATE_REPO.isBlank()) return@withContext Latest.None
+        try { parseRelease(get("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest")) }
+        catch (e: IllegalStateException) { if (e.message == "HTTP 404") Latest.None else Latest.Offline }      // 404 is GitHub's answer when nothing has been released
+        catch (e: Exception) { Latest.Offline }
+    }
+
+    /** The version a release carries and where to get it: the installable file when the release has one, its page otherwise. */
+    fun parseRelease(json: String): Latest {
+        val o = JSONObject(json); val tag = o.optString("tag_name").trimStart('v', 'V')
+        if (tag.isBlank()) return Latest.None
+        val assets = o.optJSONArray("assets")
+        val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url")
+        return Latest.Out(tag, apk?.takeIf { it.isNotBlank() } ?: o.optString("html_url"))
     }
 
     /** True when version [a] is newer than [b], comparing number by number. */
@@ -67,6 +84,13 @@ object Online {
         for (i in 0 until maxOf(x.size, y.size)) { val d = x.getOrElse(i) { 0 } - y.getOrElse(i) { 0 }; if (d != 0) return d > 0 }
         return false
     }
+}
+
+/** What GitHub said about new versions. */
+sealed class Latest {
+    data class Out(val version: String, val url: String) : Latest()
+    object None : Latest()
+    object Offline : Latest()
 }
 
 /** One hour of sky: the WMO weather code, the chance of rain in percent and the wind in km/h. */

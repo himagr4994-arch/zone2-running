@@ -288,6 +288,13 @@ class ScreensTest {
     @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun weatherLineWarnsOfRain() { weatherShot("rain", "weather-rain") }
     @Test @Config(qualifiers = "w412dp-h1500dp-night-xhdpi") fun weatherLineOnACoolEvening() { weatherShot("cool", "weather-cool-dark") }
 
+    @Test fun releaseParses() {
+        val withApk = """{"tag_name":"v1.0.2","html_url":"https://github.com/x/y/releases/tag/v1.0.2","assets":[{"name":"notes.txt","browser_download_url":"https://e/notes.txt"},{"name":"Zone2Running-1.0.2.apk","browser_download_url":"https://e/app.apk"}]}"""
+        assertEquals(Latest.Out("1.0.2", "https://e/app.apk"), Online.parseRelease(withApk))                       // straight to the installable file
+        assertEquals(Latest.Out("1.0.2", "https://p"), Online.parseRelease("""{"tag_name":"1.0.2","html_url":"https://p","assets":[]}"""))
+        assertTrue(Online.parseRelease("{}") is Latest.None)
+    }
+
     @Test fun forecastParses() {
         val json = """{"hourly":{"time":["2026-11-17T18:00","2026-11-17T19:00"],"temperature_2m":[29.5,28.1],"dew_point_2m":[21.0,null]}}"""
         val h = Online.parseForecast(json)

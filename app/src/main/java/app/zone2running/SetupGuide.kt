@@ -606,6 +606,13 @@ fun DiagnosticsPanel(vm: AppVM) {
             Btn("Copy report", ghost = true, small = true) { clip.setText(androidx.compose.ui.text.AnnotatedString(Diagnostics.report(ctx, vm.data, vm.healthGranted))); vm.toast = "Report copied" }
             if (crash != null) Btn("Clear", ghost = true, small = true) { Diagnostics.clear(ctx); crash = null }
         }
-        if (BuildConfig.UPDATE_REPO.isNotBlank()) Toggle("Check for new versions", "Asks GitHub once when you open the app. Off by default.", s.updateCheck) { v -> vm.updateSettings { it.copy(updateCheck = v) } }
+        if (BuildConfig.UPDATE_REPO.isNotBlank()) {
+            Toggle("Check for new versions", "Asks GitHub each time you open the app. Off by default.", s.updateCheck) { v -> vm.updateSettings { it.copy(updateCheck = v) }; if (v) vm.checkUpdate() }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Btn(if (vm.checking) "Checking…" else "Check now", ghost = true, small = true) { vm.checkUpdate() }
+                Small("You have version ${BuildConfig.VERSION_NAME}.")
+            }
+            vm.update?.let { (version, url) -> Link("plus", "Version $version is out", "Tap to download. Installing it keeps your data") { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } } }
+        }
     }
 }

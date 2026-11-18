@@ -144,7 +144,7 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
 
         vm.update?.let { (version, url) ->
             val ctx = androidx.compose.ui.platform.LocalContext.current
-            Link("plus", "Version $version is out", "Installing it keeps your data") { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } }
+            Link("plus", "Version $version is out", "Tap to download. Installing it keeps your data") { try { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (x: Exception) { } }
         }
         e.raceDaysLeft?.let { left ->
             val cast = e.raceCast()

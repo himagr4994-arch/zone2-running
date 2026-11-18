@@ -125,6 +125,21 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         refreshOnline()
     }
 
+    var checking by mutableStateOf(false); private set
+
+    /** A check the runner asked for, so it always says what it found. */
+    fun checkUpdate() = viewModelScope.launch {
+        if (checking) return@launch
+        checking = true
+        val got = Online.latest(); checking = false
+        toast = when {
+            got is Latest.Out && Online.newer(got.version, BuildConfig.VERSION_NAME) -> { update = got.version to got.url; "Version ${got.version} is out. It's on the Today screen under Details." }
+            got is Latest.Out -> "You have the newest version (${BuildConfig.VERSION_NAME})."
+            got is Latest.None -> "No version has been published on GitHub yet. You have ${BuildConfig.VERSION_NAME}."
+            else -> "Couldn't reach GitHub. Check your connection and try again."
+        }
+    }
+
     /** Fetches the forecast (at most every three hours) and looks for a newer version, each only if switched on. */
     private suspend fun refreshOnline() {
         val s = settings

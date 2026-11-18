@@ -129,7 +129,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     private suspend fun refreshOnline() {
         val s = settings
         if (s.weatherOn && (s.lat != 0.0 || s.lon != 0.0) && System.currentTimeMillis() - weather.fetchedAt > 3 * 3600_000L)
-            Online.forecast(s.lat, s.lon)?.let { weather.store(it); wxTick++ }
+            Online.forecast(s.lat, s.lon)?.let { weather.store(it.first, it.second); wxTick++ }
         if (s.updateCheck) Online.latestRelease()?.let { if (Online.newer(it.first, BuildConfig.VERSION_NAME)) update = it }
     }
 
@@ -141,7 +141,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
             if (hit == null) toast = "Couldn't find that place. Check the spelling and your connection."
             else {
                 updateSettings { it.copy(weatherOn = true, city = hit.first, lat = hit.second, lon = hit.third) }
-                Online.forecast(hit.second, hit.third)?.let { weather.store(it); wxTick++ }
+                Online.forecast(hit.second, hit.third)?.let { weather.store(it.first, it.second); wxTick++ }
                 toast = "Weather on for ${hit.first}"
             }
             cityBusy = false

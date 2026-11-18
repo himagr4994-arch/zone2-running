@@ -85,6 +85,8 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
 
     Box(Modifier.rise(1)) { PaceHero(vm, e, improved) }
 
+    if (vm.settings.weatherOn && wxOpen) WeatherStrip(vm.weather, vm.settings.city, e.today, vm.clock, vm.wxTick)
+
     Column(Modifier.rise(2), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         val hasAction = lead.cta.isNotEmpty()
         when {
@@ -303,6 +305,10 @@ fun PaceHero(vm: AppVM, e: Engine, improved: Boolean) {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { for (i in 0..2) Box(Modifier.size(8.dp).clip(CircleShape).background(if (i <= conf.level) p.heroMark else p.heroTrack)) }
                 Text(conf.label + (e.band?.let { " · likely ${fmtPace(it.first)}–${fmtPace(it.second)}" } ?: if (pts.size > 1) " · drag the chart to look back" else ""), color = p.heroMuted, fontSize = 13.sp, fontFamily = BodyFont)
             }
+        }
+        if (vm.settings.weatherOn) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(p.heroTrack))
+            WeatherLine(vm.weather, e.today, vm.clock, vm.wxTick, p.heroInk, p.heroMuted, Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp))
         }
     }
 }

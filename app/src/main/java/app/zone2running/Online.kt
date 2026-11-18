@@ -34,9 +34,19 @@ object Online {
         } catch (e: Exception) { null }
     }
 
-    /** Two days of hourly temperature and dew point, keyed "2026-11-17T19". Null when the request fails. */
-    suspend fun forecast(lat: Double, lon: Double): Map<String, Pair<Double, Double>>? = withContext(Dispatchers.IO) {
-        try { parseForecast(get("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&hourly=temperature_2m,dew_point_2m&forecast_days=2&past_days=1&timezone=auto")) } catch (e: Exception) { null }
+    /** Two days of hourly temperature and dew point, keyed "2026-11-17T19", plus the sky for each hour. Null when the request fails. */
+    suspend fun forecast(lat: Double, lon: Double): Pair<Map<String, Pair<Double, Double>>, Map<String, Sky>>? = withContext(Dispatchers.IO) {
+        try {
+            get("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&hourly=temperature_2m,dew_point_2m,weather_code,precipitation_probability,wind_speed_10m&forecast_days=2&past_days=1&timezone=auto")
+                .let { parseForecast(it) to parseSky(it) }
+        } catch (e: Exception) { null }
+    }
+
+    /** The sky for each hour. Empty when the reply carries none, which older replies and some places do. */
+    fun parseSky(json: String): Map<String, Sky> {
+        val h = JSONObject(json).getJSONObject("hourly"); val t = h.getJSONArray("time")
+        val code = h.optJSONArray("weather_code") ?: return emptyMap(); val rain = h.optJSONArray("precipitation_probability"); val wind = h.optJSONArray("wind_speed_10m")
+        return (0 until t.length()).filter { !code.isNull(it) }.associate { t.getString(it).take(13) to Sky(code.getInt(it), rain?.optInt(it, 0) ?: 0, wind?.optDouble(it, 0.0)?.let { w -> if (w.isNaN()) 0 else w.toInt() } ?: 0) }
     }
 
     fun parseForecast(json: String): Map<String, Pair<Double, Double>> {
@@ -59,10 +69,14 @@ object Online {
     }
 }
 
+/** One hour of sky: the WMO weather code, the chance of rain in percent and the wind in km/h. */
+data class Sky(val code: Int, val rain: Int, val wind: Int)
+
 /** The forecast kept on the phone between fetches, so the home screen never waits on the network. */
 class WeatherCache(ctx: Context) : Wx {
     private val file = File(ctx.filesDir, "weather.json")
     var hours: Map<String, Pair<Double, Double>> = emptyMap(); private set
+    var sky: Map<String, Sky> = emptyMap(); private set
     var fetchedAt = 0L; private set
 
     init {
@@ -70,16 +84,24 @@ class WeatherCache(ctx: Context) : Wx {
             if (file.exists()) JSONObject(file.readText()).let { o ->
                 fetchedAt = o.optLong("at"); val h = o.getJSONObject("hours")
                 hours = h.keys().asSequence().associateWith { k -> h.getJSONArray(k).let { it.getDouble(0) to it.getDouble(1) } }
+                o.optJSONObject("sky")?.let { s -> sky = s.keys().asSequence().associateWith { k -> s.getJSONArray(k).let { Sky(it.getInt(0), it.getInt(1), it.getInt(2)) } } }
             }
         } catch (e: Exception) { }
     }
 
-    fun store(fresh: Map<String, Pair<Double, Double>>) {
-        hours = fresh; fetchedAt = System.currentTimeMillis()
-        try { file.writeText(JSONObject().put("at", fetchedAt).put("hours", JSONObject().also { o -> fresh.forEach { (k, v) -> o.put(k, org.json.JSONArray(listOf(v.first, v.second))) } }).toString()) } catch (e: Exception) { }
+    fun store(fresh: Map<String, Pair<Double, Double>>, freshSky: Map<String, Sky> = emptyMap()) {
+        hours = fresh; sky = freshSky; fetchedAt = System.currentTimeMillis()
+        try {
+            file.writeText(JSONObject().put("at", fetchedAt)
+                .put("hours", JSONObject().also { o -> fresh.forEach { (k, v) -> o.put(k, org.json.JSONArray(listOf(v.first, v.second))) } })
+                .put("sky", JSONObject().also { o -> freshSky.forEach { (k, v) -> o.put(k, org.json.JSONArray(listOf(v.code, v.rain, v.wind))) } }).toString())
+        } catch (e: Exception) { }
     }
 
-    fun clear() { hours = emptyMap(); fetchedAt = 0; file.delete() }
+    fun clear() { hours = emptyMap(); sky = emptyMap(); fetchedAt = 0; file.delete() }
+
+    private fun key(date: LocalDate, hour: Int) = "${date}T${hour.coerceIn(0, 23).toString().padStart(2, '0')}"
+    fun skyAt(date: LocalDate, hour: Int) = sky[key(date, hour)]
 
     override fun at(date: LocalDate, minute: Int) = hours["${date}T${(minute / 60).coerceIn(0, 23).toString().padStart(2, '0')}"]
 }

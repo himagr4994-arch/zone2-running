@@ -253,10 +253,48 @@ class ScreensTest {
         } finally { U.miles = false }
     }
 
+    /** A warming morning, a rainy afternoon and a cool evening, as the home screen strip shows them. */
+    private fun weatherVm(kind: String): AppVM {
+        val vm = seeded()
+        val temps = when (kind) { "warm" -> listOf(24, 27, 30, 32, 33, 33, 32, 31, 29, 27, 26, 25, 24, 23, 23, 22); "rain" -> listOf(27, 27, 26, 25, 25, 24, 24, 24, 23, 23, 23, 22, 22, 22, 21, 21); else -> listOf(19, 18, 17, 17, 16, 16, 15, 15, 15, 14, 14, 14, 15, 16, 18, 20) }
+        val codes = when (kind) { "warm" -> listOf(0, 0, 1, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0); "rain" -> listOf(2, 3, 61, 63, 95, 80, 3, 3, 2, 2, 1, 1, 0, 0, 0, 0); else -> List(16) { 0 } }
+        val rain = when (kind) { "rain" -> listOf(10, 35, 70, 85, 90, 60, 30, 20, 10, 5, 0, 0, 0, 0, 0, 0); else -> List(16) { 0 } }
+        val start = when (kind) { "warm" -> 8; "rain" -> 14; else -> 19 }
+        val hours = HashMap<String, Pair<Double, Double>>(); val sky = HashMap<String, Sky>()
+        for (i in 0 until 16) {
+            val h = start + i; val k = "${today.plusDays((h / 24).toLong())}T${(h % 24).toString().padStart(2, '0')}"
+            hours[k] = temps[i].toDouble() to (if (kind == "cool") 9.0 else if (kind == "rain") 22.0 else 16.0 + i * .4); sky[k] = Sky(codes[i], rain[i], 6 + i % 5)
+        }
+        vm.weather.store(hours, sky)
+        vm.updateSettings { it.copy(weatherOn = true, city = "Raipur", lat = 21.25, lon = 81.63, days = (1..7).toList()) }
+        vm.clock = LocalTime.of(start, 45)
+        return vm
+    }
+
+    private fun weatherShot(kind: String, name: String, open: Boolean = false) {
+        val vm = weatherVm(kind)
+        try {
+            wxOpen = false
+            rule.setContent { AppTheme { App(vm) } }
+            rule.waitForIdle(); rule.onNodeWithText(when (kind) { "warm" -> "Warming up"; "rain" -> "Rain 4 pm"; else -> "Good to run" }).assertExists(); shot(name)
+            if (open) {
+                rule.onNodeWithText("Warming up").performClick(); rule.waitForIdle(); rule.onNodeWithText("RAIPUR · NOW").assertExists(); shot("$name-open")
+                rule.onNodeWithText("Tap for the rest of the day.").performClick(); rule.waitForIdle(); rule.onNodeWithText("3 pm").assertExists()
+            }
+        } finally { vm.weather.clear(); wxOpen = false }
+    }
+
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun weatherLineInThePaceCard() { weatherShot("warm", "weather", open = true) }
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun weatherLineWarnsOfRain() { weatherShot("rain", "weather-rain") }
+    @Test @Config(qualifiers = "w412dp-h1500dp-night-xhdpi") fun weatherLineOnACoolEvening() { weatherShot("cool", "weather-cool-dark") }
+
     @Test fun forecastParses() {
         val json = """{"hourly":{"time":["2026-11-17T18:00","2026-11-17T19:00"],"temperature_2m":[29.5,28.1],"dew_point_2m":[21.0,null]}}"""
         val h = Online.parseForecast(json)
         assertEquals(1, h.size); assertEquals(29.5 to 21.0, h["2026-11-17T18"])
+        assertTrue(Online.parseSky(json).isEmpty())                                // a reply without the sky still gives temperatures
+        val full = """{"hourly":{"time":["2026-11-17T18:00"],"temperature_2m":[29.5],"dew_point_2m":[21.0],"weather_code":[61],"precipitation_probability":[70],"wind_speed_10m":[11.6]}}"""
+        assertEquals(Sky(61, 70, 11), Online.parseSky(full)["2026-11-17T18"])
     }
 
     @Test fun lessonCanBeFinished() {

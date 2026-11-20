@@ -75,13 +75,18 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
     // Only a change bigger than the usual wobble between runs gets the celebration.
     val improved = c != null && seen > 0 && c < seen - 3 && e.paceChange()?.let { it.real && it.delta > 0 } == true
 
-    Row(Modifier.rise(0), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    // The day after a missed run, that is the one thing the screen opens on: it replaces the usual headline.
+    val gone = remember(e) { e.missed() }
+    if (gone != null) MissedCard(vm, gone, openLive)
+    else Row(Modifier.rise(0), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Dil(if (improved) "proud" else lead.mood, Modifier.size(84.dp))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Label(lead.eyebrow)
             Text(lead.title, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 29.sp, color = p.ink)
         }
     }
+
+    if (gone == null) e.weekPlan(mondayOf(e.today)).note.takeIf { it.isNotEmpty() }?.let { NoteBox(Note("plain", it)) }
 
     Box(Modifier.rise(1)) { PaceHero(vm, e, improved) }
 
@@ -165,6 +170,68 @@ fun TodayScreen(vm: AppVM, e: Engine, openPlan: () -> Unit, openSetup: () -> Uni
         val notes = e.coach()
         if (notes.isNotEmpty() && e.runs.isNotEmpty()) Fold("bolt", "Coach notes", notes.first().text) { notes.forEach { NoteBox(it) } }
         if (vm.health.available() && !vm.healthGranted) Link("plus", "Import runs automatically", "Connect Health Connect in Settings", openSetup)
+    }
+}
+
+/**
+ * The answer to a missed session: one filled button that points at the next run, a quiet one to let it go,
+ * and a small link for the different case of being unwell. [start] opens today's run.
+ */
+@Composable
+fun MissedChoices(vm: AppVM, m: Missed, start: (Session) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when {
+            m.todays != null -> BigBtn("Start today's run", "play") { vm.override(m.date, "skip"); start(m.todays) }
+            m.moveTo == vm.engine().today -> Pick("Run it today", true, Modifier.fillMaxWidth()) { vm.moveSession(m.date, m.moveTo, m.session.kind); vm.toast = "It's on for today" }
+            m.moveTo != null -> Pick("Move it to ${DAY_NAMES[m.moveTo.dayOfWeek.value - 1]}", true, Modifier.fillMaxWidth()) { vm.moveSession(m.date, m.moveTo, m.session.kind); vm.toast = "Moved to ${DAY_NAMES[m.moveTo.dayOfWeek.value - 1]}" }
+        }
+        Pick(if (m.todays != null) "Not today" else if (m.moveTo != null) "Let it go" else "Got it", m.todays == null && m.moveTo == null, Modifier.fillMaxWidth()) { vm.override(m.date, "skip") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { TextLink("I was sick or hurt") { vm.markSick(m.date); vm.toast = "Rest up. Your next run will be short and easy." } }
+    }
+}
+
+/** What the buttons on a missed-day prompt do, shared by every treatment of it. */
+private class MissedActs(val vm: AppVM, val m: Missed, val start: (Session) -> Unit) {
+    val today = vm.engine().today
+    val primary: String? = when { m.todays != null -> "Start today's run"; m.moveTo == today -> "Run it today"; m.moveTo != null -> "Move it to ${DAY_NAMES[m.moveTo.dayOfWeek.value - 1]}"; else -> null }
+    val later = if (m.todays != null) "Not today" else if (m.moveTo != null) "Let it go" else "Got it"
+    fun go() { when { m.todays != null -> { vm.override(m.date, "skip"); start(m.todays) }; m.moveTo != null -> { vm.moveSession(m.date, m.moveTo, m.session.kind); vm.toast = if (m.moveTo == today) "It's on for today" else "Moved to ${DAY_NAMES[m.moveTo.dayOfWeek.value - 1]}" } } }
+    fun skip() = vm.override(m.date, "skip")
+    fun sick() { vm.markSick(m.date); vm.toast = "Rest up. Your next run will be short and easy." }
+    val detail = m.why + (m.todays?.let { " ${it.title}, ${it.min} min." } ?: if (m.moveTo != null) " ${m.session.title}, ${m.session.min} min." else "")
+    val label = "Missed ${DAY_NAMES[m.date.dayOfWeek.value - 1]}'s ${m.session.title.lowercase()}"
+}
+
+/**
+ * The day after a missed run, the home screen opens on this instead of its usual headline: Dil, the way forward in large type,
+ * and one button, on a bright ground that nothing else in the app uses. The whole card starts the run when tapped.
+ */
+@Composable
+fun MissedCard(vm: AppVM, m: Missed, start: (Session) -> Unit) {
+    val p = LocalPal.current
+    val a = remember(m) { MissedActs(vm, m, start) }
+    val tick = haptic()
+    val ink = Color(0xFF10201D); val soft = Color(0xFF3B4A2A)
+    val shape = RoundedCornerShape(24.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(p.heroMark).then(if (a.primary != null) Modifier.clickable { tick(true); a.go() } else Modifier).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Dil("hello", Modifier.size(72.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Label(a.label, soft)
+                Text(m.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 30.sp, lineHeight = 32.sp, color = ink)
+            }
+        }
+        Text(a.detail, fontFamily = BodyFont, fontSize = 15.5.sp, lineHeight = 22.sp, color = ink)
+        val btn = RoundedCornerShape(16.dp)
+        Row(Modifier.fillMaxWidth().clip(btn).background(Color(0xFF0B3A34)).clickable { tick(true); if (a.primary != null) a.go() else a.skip() }.padding(vertical = 17.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            if (m.todays != null) { Glyph("play", Color.White, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp)) }
+            Text(a.primary ?: a.later, color = Color.White, fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, maxLines = 1)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            val link: @Composable (String, () -> Unit) -> Unit = { s, f -> Text(s, Modifier.clip(RoundedCornerShape(8.dp)).clickable { tick(false); f() }.padding(horizontal = 10.dp, vertical = 6.dp), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = ink, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline) }
+            if (a.primary != null) link(a.later) { a.skip() }
+            link("I was sick or hurt") { a.sick() }
+        }
     }
 }
 
@@ -253,7 +320,7 @@ fun PaceHero(vm: AppVM, e: Engine, improved: Boolean) {
     val p = LocalPal.current
     val tg = e.s.targetPace.toDouble()
     val c = e.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero).glassEdge(RoundedCornerShape(22.dp))) {
         if (c == null) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Label("Zone 2 pace target", p.heroMuted)
@@ -410,10 +477,14 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
         }
     }
 
+    if (plan.note.isNotEmpty() && !onBreak) NoteBox(Note("plain", plan.note))
+
     // The selected day.
     key(off, sel) {
         val d = mon.plusDays(sel.toLong()); val s = plan.ses[sel + 1]; val rs = e.runsOn(d); val today = d == e.today
         var showSteps by remember { mutableStateOf(false) }
+        val skipped = e.s.overrides[d] == "skip" && rs.isEmpty()
+        val gone = if (rs.isEmpty() && s != null && d.isBefore(e.today) && !onBreak) e.missedOn(d) else null
         Panel(Modifier.rise(1)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 SessionArt(kinds[sel], Modifier.size(58.dp), done = rs.isNotEmpty())
@@ -422,7 +493,8 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
                     Head(s?.title ?: if (kinds[sel] == "strength") "Strength, 20 min" else "Rest")
                     if (s != null) Small("${s.min} min · " + if (s.kind == "talk") "finds your Zone 2 ceiling" else if (s.type in setOf("tempo", "intervals")) "hard day" else "cap ${e.zb[2] - 1} bpm")
                 }
-                if (rs.isEmpty() && s != null && d.isBefore(e.today) && !onBreak) Tag("Missed", p.warnBg, p.warnInk)
+                if (gone != null) Tag("Missed", p.warnBg, p.warnInk)
+                if (skipped) Tag(if (d in e.s.sick) "Unwell" else "Skipped", p.surface2, p.muted)
             }
             Text(when { onBreak -> "You're taking this week off."; s != null -> s.detail.substringBefore(". ") + "."; kinds[sel] == "strength" -> "Squats, lunges, calf raises, planks."; else -> "Nothing planned. Rest is part of the plan." },
                 fontFamily = BodyFont, fontSize = 15.sp, lineHeight = 21.sp, color = p.ink)
@@ -437,10 +509,16 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
             rs.firstOrNull()?.let { r -> Link("road", "Logged", "${U.dist(r.distKm)} · ${fmtPace(paceOf(r))} ${U.per}" + if (r.avgHr > 0) " · ${r.avgHr} bpm" else "") { openRun(r) } }
             if (rs.isEmpty() && !onBreak) {
                 if (s != null && today) BigBtn("Start run", "play") { openLive(s) }
+                // A missed day gets its answer right here: the reasoning in a line, then the choices as buttons.
+                if (gone != null) { Text(gone.head, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = p.ink); Small(gone.why); MissedChoices(vm, gone, openLive) }
+                if (skipped) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Small(if (d in e.s.sick) "Skipped because you were unwell. Your next run is kept short and easy." else "You skipped this one. Nothing to make up.", modifier = Modifier.weight(1f))
+                    TextLink("Undo") { vm.unskip(d) }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (s != null && !d.isAfter(e.today)) TextLink("Log it") { openForm(FormSeed(date = d, type = s.type)) }
-                    if (s != null) TextLink(if (showSteps) "Hide blocks" else "What you'll do") { showSteps = !showSteps }
-                    if (!d.isBefore(e.today)) TextLink(if (s != null) "Change" else "Add a run") { menu = d }
+                    if (s != null && !d.isAfter(e.today)) TextLink(if (gone != null) "I did run it: log it" else "Log it") { openForm(FormSeed(date = d, type = s.type)) }
+                    if (s != null && gone == null) TextLink(if (showSteps) "Hide blocks" else "What you'll do") { showSteps = !showSteps }
+                    if (!d.isBefore(e.today) && !skipped) TextLink(if (s != null) "Change or skip" else "Add a run") { menu = d }
                 }
             }
         }
@@ -453,7 +531,8 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
             title = { Text("${DAY_NAMES[d.dayOfWeek.value - 1]} ${fmtDay(d)}") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Small(if (cur != null) "Planned: ${cur.title}. Swap it for:" else "Rest day. Add:")
+                    if (cur != null) { Pick("Skip this session", false, Modifier.fillMaxWidth()) { vm.override(d, "skip"); close() }; Small("Nothing is added elsewhere. You can undo it from the day.") }
+                    Small(if (cur != null) "Or swap ${cur.title} for:" else "Rest day. Add:")
                     SWAP_KINDS.forEach { (kind, name) -> Pick(name, cur?.kind == kind, Modifier.fillMaxWidth()) { vm.override(d, kind); close() } }
                     if (cur != null) {
                         val free = (0..6).map { mon.plusDays(it.toLong()) }.filter { it != d && !it.isBefore(e.today) && plan.ses[it.dayOfWeek.value] == null && e.runsOn(it).isEmpty() }
@@ -461,7 +540,6 @@ fun PlanScreen(vm: AppVM, e: Engine, openLive: (Session) -> Unit, openRun: (Run)
                             Small("Or move it to:")
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { free.forEach { t -> Pick(DOW[t.dayOfWeek.value - 1], false, Modifier.weight(1f)) { vm.moveSession(d, t, cur.kind); close() } } }
                         }
-                        Pick("Skip this session", false, Modifier.fillMaxWidth()) { vm.override(d, "skip"); close() }
                     }
                     if (d in e.s.overrides) Pick("Back to the plan", false, Modifier.fillMaxWidth()) { vm.override(d, null); close() }
                 }

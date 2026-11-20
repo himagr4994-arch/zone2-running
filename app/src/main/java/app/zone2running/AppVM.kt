@@ -117,6 +117,14 @@ class AppVM(app: Application) : AndroidViewModel(app) {
         toast = "Run deleted"
     }
 
+    /** Picks up a change made outside the open app, such as an answer tapped on a notification. */
+    fun reload() { val fresh = store.load(); if (fresh != data) data = fresh }
+
+    fun setRemindStyle(smart: Boolean = settings.remindSmart, late: Boolean = settings.remindLate) {
+        updateSettings { it.copy(remindSmart = smart, remindLate = late) }
+        Reminders.schedule(getApplication(), data)
+    }
+
     fun refreshHealth() = viewModelScope.launch {
         clock = java.time.LocalTime.now()
         healthGranted = try { health.granted() } catch (e: Exception) { false }
@@ -167,6 +175,12 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     /** Swaps, adds or skips the session on one day. A null kind puts the plan's own session back. */
     fun override(date: LocalDate, kind: String?) = updateSettings { it.copy(overrides = if (kind == null) it.overrides - date else it.overrides + (date to kind)) }
+
+    /** A missed or coming day skipped because of illness or a niggle. The next run after it is kept short and easy. */
+    fun markSick(date: LocalDate) = updateSettings { it.copy(overrides = it.overrides + (date to "skip"), sick = (it.sick + date).distinct().takeLast(20)) }
+
+    /** Puts a skipped day back as the plan had it. */
+    fun unskip(date: LocalDate) = updateSettings { it.copy(overrides = it.overrides - date, sick = it.sick - date) }
 
     fun moveSession(from: LocalDate, to: LocalDate, kind: String) = updateSettings { it.copy(overrides = it.overrides + (from to "skip") + (to to kind)) }
 
@@ -233,7 +247,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
 
     fun setReminder(on: Boolean, minutes: Int = settings.remindMin) {
         updateSettings { it.copy(remindOn = on, remindMin = minutes) }
-        Reminders.schedule(getApplication(), settings)
+        Reminders.schedule(getApplication(), data)
     }
 
     /** Sends a run's share picture, in the chosen look, to Android's share sheet. */

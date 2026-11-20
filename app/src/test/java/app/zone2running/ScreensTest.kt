@@ -24,6 +24,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
@@ -193,7 +196,7 @@ class ScreensTest {
         vm.toast = null; vm.clock = LocalTime.of(18, 0)
         rule.setContent { AppTheme { App(vm) } }
         rule.onNodeWithText("Move Tuesday's run to Monday?").assertExists(); shot("suggestion")
-        rule.onNodeWithText("Move it").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Move it").performScrollTo().performClick(); rule.waitForIdle()
         assertEquals(listOf(1, 4, 6, 7), vm.settings.days)
         rule.onNodeWithText("Move Tuesday's run to Monday?").assertDoesNotExist()
     }
@@ -242,7 +245,7 @@ class ScreensTest {
         rule.setContent { AppTheme { App(vm) } }
         tab("Plan")
         rule.onNodeWithText("What you'll do").performClick(); rule.waitForIdle(); shot("plan-blocks")
-        rule.onNodeWithText("Change").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Change or skip").performClick(); rule.waitForIdle()
         rule.onNodeWithText("Run-walk").performClick(); rule.waitForIdle()
         assertEquals(mapOf(today to "runwalk"), vm.settings.overrides)
         rule.onNodeWithText("Easy run-walk").assertExists()
@@ -287,6 +290,118 @@ class ScreensTest {
     @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun weatherLineInThePaceCard() { weatherShot("warm", "weather", open = true) }
     @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun weatherLineWarnsOfRain() { weatherShot("rain", "weather-rain") }
     @Test @Config(qualifiers = "w412dp-h1500dp-night-xhdpi") fun weatherLineOnACoolEvening() { weatherShot("cool", "weather-cool-dark") }
+
+    /** Yesterday's run went by and today has one planned: the home screen points at today's run, and the Plan tab offers the same on the day. */
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun aMissedRunPointsAtToday() {
+        val vm = seeded(); vm.deleteRun("r1")
+        val y = today.minusDays(1)
+        vm.updateSettings { it.copy(days = listOf(y, today, today.plusDays(2)).map { d -> d.dayOfWeek.value }, longDay = today.dayOfWeek.value) }
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Today still counts").assertExists(); rule.onNodeWithText("Start today's run").assertExists(); rule.onNodeWithText("I was sick or hurt").assertExists(); shot("missed-today")
+        if (mondayOf(y) == mondayOf(today)) {                                             // on a Monday, yesterday sits in last week's view
+            tab("Plan"); rule.onNodeWithText(DOW[y.dayOfWeek.value - 1]).performClick(); rule.waitForIdle()
+            rule.onNodeWithText("Missed").assertExists(); shot("missed-plan")
+            rule.onNodeWithText("Not today").performClick(); rule.waitForIdle(); rule.onNodeWithText("Skipped").assertExists(); shot("missed-plan-skipped")
+            rule.onNodeWithText("Undo").performClick(); rule.waitForIdle(); rule.onNodeWithText("Missed").assertExists()
+            rule.onNodeWithText("I was sick or hurt").performClick(); rule.waitForIdle(); rule.onNodeWithText("Unwell").assertExists()
+            rule.onNodeWithText(DOW[today.dayOfWeek.value - 1]).performClick(); rule.waitForIdle(); rule.onNodeWithText("first run after being unwell", substring = true).assertExists(); shot("missed-plan-unwell")
+            rule.onNodeWithText("Change or skip").performClick(); rule.waitForIdle(); rule.onNodeWithText("Skip this session").assertExists()
+            rule.onNodeWithText("Close").performClick(); rule.waitForIdle()
+            tab("Today"); assertTrue(rule.onAllNodesWithText("Not today").fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test @Config(qualifiers = "w412dp-h1500dp-night-xhdpi") fun missedCardInTheDark() {
+        val vm = seeded(); vm.deleteRun("r1")
+        vm.updateSettings { it.copy(days = listOf(today.minusDays(1), today, today.plusDays(2)).map { d -> d.dayOfWeek.value }, longDay = today.dayOfWeek.value) }
+        rule.setContent { AppTheme { App(vm) } }; rule.onNodeWithText("Today still counts").assertExists(); shot("missed-today-dark")
+    }
+
+    /** Yesterday's run went by and today is a rest day: the run can simply happen a day late. */
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun aMissedRunCanHappenADayLate() {
+        val vm = seeded(); vm.deleteRun("r1")
+        val y = today.minusDays(1)
+        vm.updateSettings { it.copy(days = listOf(y, today.plusDays(2), today.plusDays(4)).map { d -> d.dayOfWeek.value }, longDay = today.plusDays(4).dayOfWeek.value) }
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Run it today?").assertExists(); shot("missed-free-day")
+        rule.onNodeWithText("Run it today").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Start run").assertExists(); assertTrue(rule.onAllNodesWithText("Run it today?").fetchSemanticsNodes().isEmpty()); shot("missed-free-day-after")
+    }
+
+    /** The other shapes the card takes: a hard session with a later day to move to, and one with nothing to make up. */
+    @Test @Config(qualifiers = "w412dp-h1100dp-xhdpi") fun missedCardVariants() {
+        val vm = seeded()
+        val hard = Session("intervals", "4 × 4 min hard", 50, "", "4x4"); val long = Session("long", "Long easy run", 80, "", "long")
+        val thu = mondayOf(today).plusDays(3)
+        rule.setContent { AppTheme { Column(Modifier.background(LocalPal.current.bg).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            MissedCard(vm, Missed(thu, hard, thu.plusDays(2), "Saturday is free, with an easier day either side.", "Move it to Saturday?")) {}
+            MissedCard(vm, Missed(thu.plusDays(3), long, null, "Nothing to make up.", "Next run: Tuesday")) {}
+        } } }
+        rule.onNodeWithText("Move it to Saturday").assertExists(); rule.onNodeWithText("Got it").assertExists(); shot("missed-variants")
+    }
+
+    /** Eighteen days without a run: the home screen and the plan both say how the return is paced. */
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun comingBackAfterTwoWeeks() {
+        val vm = seeded(); listOf("r1", "r5", "r9", "r11", "r13", "r15").forEach { vm.deleteRun(it) }
+        vm.updateSettings { it.copy(days = listOf(2, 4, 6, 7)) }
+        rule.setContent { AppTheme { App(vm) } }
+        rule.onNodeWithText("Back after 18 days off", substring = true).assertExists(); shot("comeback-today")
+        tab("Plan"); rule.onNodeWithText("Easing back in", substring = true).assertExists(); shot("comeback-plan")
+    }
+
+    /** The notification as Android receives it: its text, its buttons, and the drawn card, which is saved to look at. */
+    @Test fun theNotificationCarriesItsButtonsAndPicture() {
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val runs = (1L..20L).map { Run("n$it", today.minusDays(it + 1), "easy", 5.0, 2400, 142, startMin = 420) }
+        val set = Settings(maxHr = 188, onboarded = true, remindOn = true, days = listOf(today.minusDays(1), today, today.plusDays(2)).map { it.dayOfWeek.value }, longDay = today.dayOfWeek.value)
+        val e = Engine(set, runs, today)
+        val n = e.nudge()!!
+        assertEquals("back", n.kind)
+        val built = Reminders.build(ctx, n, e).build()
+        assertEquals(listOf("Start run", "Not today"), built.actions.map { it.title.toString() })
+        assertEquals("Yesterday's gone. Today still counts.", built.extras.getString(android.app.Notification.EXTRA_TITLE))
+        java.io.File("build/shots").mkdirs()
+        Reminders.card(ctx, n.session!!, e).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, java.io.File("build/shots/notification-card.png").outputStream())
+        Reminders.mascot().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, java.io.File("build/shots/notification-mascot.png").outputStream())
+        // Answering from the notification writes the choice where the app will find it.
+        Store(ctx).save(AppData(set, runs))
+        Reminders.answer(ctx, Reminders.SKIP, n.missed!!)
+        assertEquals("skip", Store(ctx).load().settings.overrides[n.missed])
+        assertTrue(Engine(Store(ctx).load().settings, runs, today).missed() == null)
+    }
+
+    /** The glass look across the app: the same screens, on the colour field, in light and dark. */
+    private fun glassTour(tag: String) {
+        val vm = weatherVm("warm"); vm.updateSettings { it.copy(look = "glass") }
+        try {
+            rule.setContent { AppTheme(glass = true) { App(vm) } }
+            shot("glass-$tag-today")
+            tab("Plan"); shot("glass-$tag-plan")
+            tab("Progress"); shot("glass-$tag-progress")
+            rule.onNodeWithText("Badges").performClick(); rule.waitForIdle(); shot("glass-$tag-badges")
+            rule.onNodeWithText("Runs").performClick(); rule.waitForIdle(); shot("glass-$tag-runs")
+            val d = today.minusDays(1)
+            rule.onNodeWithText("${DOW[d.dayOfWeek.value - 1]} ${fmtDay(d)} · Easy run").performClick(); rule.waitForIdle(); shot("glass-$tag-run")
+        } finally { vm.weather.clear() }
+    }
+    private fun glassSettings(tag: String) {
+        val vm = seeded(); vm.updateSettings { it.copy(look = "glass") }
+        rule.setContent { AppTheme(glass = true) { App(vm) } }
+        cog("Settings"); rule.onNodeWithText("Look").assertExists(); shot("glass-$tag-settings")
+        // Dialogs stay solid so their text never sits on a see-through pane.
+        back(2); tab("Plan"); rule.onNodeWithText(if (rule.onAllNodesWithText("Change or skip").fetchSemanticsNodes().isNotEmpty()) "Change or skip" else "Add a run").performClick(); rule.waitForIdle(); rule.onNodeWithText("Close").assertExists()
+    }
+    @Test @Config(qualifiers = "w412dp-h1700dp-xhdpi") fun glassSettingsLight() { glassSettings("light") }
+    @Test @Config(qualifiers = "w412dp-h1700dp-night-xhdpi") fun glassSettingsDark() { glassSettings("dark") }
+    @Test @Config(qualifiers = "w412dp-h1700dp-xhdpi") fun glassLookLight() { glassTour("light") }
+    @Test @Config(qualifiers = "w412dp-h1700dp-night-xhdpi") fun glassLookDark() { glassTour("dark") }
+
+    @Test @Config(qualifiers = "w412dp-h1500dp-xhdpi") fun glassMissedDay() {
+        val vm = seeded(); vm.deleteRun("r1")
+        vm.updateSettings { it.copy(days = listOf(today.minusDays(1), today, today.plusDays(2)).map { d -> d.dayOfWeek.value }, longDay = today.dayOfWeek.value) }
+        rule.setContent { AppTheme(glass = true) { App(vm) } }
+        rule.onNodeWithText("Today still counts").assertExists(); shot("glass-missed")
+    }
 
     @Test fun releaseParses() {
         val withApk = """{"tag_name":"v1.0.2","html_url":"https://github.com/x/y/releases/tag/v1.0.2","assets":[{"name":"notes.txt","browser_download_url":"https://e/notes.txt"},{"name":"Zone2Running-1.0.2.apk","browser_download_url":"https://e/app.apk"}]}"""
@@ -406,7 +521,7 @@ class ScreensTest {
         vm.updateSettings { it.copy(days = (1..7).toList()) }                      // whatever weekday the test runs on, there is a run to start
         val e = vm.engine()
         rule.setContent { AppTheme { App(vm) } }
-        rule.onNodeWithText("Start run").performClick(); rule.waitForIdle()
+        rule.onNodeWithText("Start run").performScrollTo().performClick(); rule.waitForIdle()
         rule.onNodeWithText("GPS SIGNAL").assertExists(); shot("live-briefing-gps")
         Live.type = "easy"; Live.steps = e.steps(Session("easy", "Easy run", 45, ""))
         Live.snap = LiveSnap(true, false, 1325, 2740.0, 144, 2, 1, "Easy running", 1175, "easy", "", 484.0, "GPS locked", "Connected",

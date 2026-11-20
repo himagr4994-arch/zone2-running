@@ -93,7 +93,7 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: B
         Label("${DAY_NAMES[r.date.dayOfWeek.value - 1]} ${fmtDay(r.date)} ${r.date.year}" + if (r.startMin >= 0) " · ${fmtClock(r.startMin)}" else "")
         Text(SWAP_KINDS[r.kind]?.takeIf { r.kind in setOf("runwalk", "talk", "4x4", "6x3") } ?: TYPE_NAMES[r.type] ?: "Run", fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 32.sp, color = p.ink)
     }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.hero).glassEdge(RoundedCornerShape(22.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(fmtPace(paceOf(r)), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 88.sp, lineHeight = 80.sp, color = p.heroInk)
             Text(" ${U.per}", Modifier.padding(bottom = 7.dp), fontFamily = Display, fontWeight = FontWeight.SemiBold, fontSize = 22.sp, color = p.heroMuted)
@@ -153,7 +153,7 @@ fun RunPage(e: Engine, r: Run, rate: (Int) -> Unit, edit: () -> Unit, streets: B
         Label("What this run says")
         d.learned.forEach { NoteBox(it) }
     }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.hero).padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.hero).glassEdge(RoundedCornerShape(18.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Label("Next time", p.heroMuted)
         Text(d.next, fontFamily = BodyFont, fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 23.sp, color = p.heroInk)
     }

@@ -1,5 +1,7 @@
 package app.zone2running
 
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,6 +45,8 @@ data class Pal(
     val hero: Color, val heroInk: Color, val heroMuted: Color, val heroTrack: Color, val heroMark: Color,
     val zones: List<Color>, val warnBg: Color, val warnInk: Color, val goodBg: Color, val goodInk: Color,
     val gold: Color, val easy: Color, val medals: List<Color>, val danger: Color,
+    val glass: Boolean = false,                 // cards are tinted, see-through panes over a soft colour field
+    val solid: Color = surface,                 // an opaque surface for things that float over the page: dialogs, menus, sheets
 )
 
 val LightPal = Pal(
@@ -66,15 +70,49 @@ val LocalPal = staticCompositionLocalOf { LightPal }
 val Display = FontFamily(Font(R.font.barlowcondensed_semibold, FontWeight.SemiBold), Font(R.font.barlowcondensed_bold, FontWeight.Bold))
 val BodyFont = FontFamily(Font(R.font.barlow_regular, FontWeight.Normal), Font(R.font.barlow_medium, FontWeight.Medium), Font(R.font.barlow_semibold, FontWeight.SemiBold))
 
+/**
+ * The glass look. The page is a soft field of the app's own greens, gold and blue; cards are panes of tinted glass lying on it.
+ * Because the field is smooth, a see-through pane over it reads as frosted without blurring anything, so it costs nothing to draw
+ * and looks the same on every version of Android. Text colours are kept as strong as in the classic look.
+ */
+val GlassLight = LightPal.copy(
+    bg = Color(0xFFEAF3F0), surface = Color(0x9EFFFFFF), surface2 = Color(0x73FFFFFF), line = Color(0x2410201D),
+    hero = Color(0xE60B3A34), heroTrack = Color(0x33FFFFFF), goodBg = Color(0xB3D2EFE7), warnBg = Color(0xCCFBEEDD),
+    glass = true, solid = Color(0xFFF6FBF9),
+)
+val GlassDark = DarkPal.copy(
+    bg = Color(0xFF061B18), surface = Color(0x1CFFFFFF), surface2 = Color(0x17FFFFFF), line = Color(0x30FFFFFF), muted = Color(0xFFB6C8C3),
+    hero = Color(0x8C0B2A26), heroTrack = Color(0x2EFFFFFF), goodBg = Color(0x803CC4AD).copy(alpha = .22f), warnBg = Color(0x59C98A1A),
+    glass = true, solid = Color(0xFF12221F),
+)
+
+/** The colour field the glass panes lie on. It stays put while the page scrolls over it. */
+fun Modifier.glassField(p: Pal): Modifier = if (!p.glass) this else drawBehind {
+    val dark = p.ink.red > .5f
+    drawRect(p.bg)
+    fun glow(c: Color, x: Float, y: Float, r: Float) = drawRect(Brush.radialGradient(listOf(c, c.copy(alpha = 0f)), Offset(size.width * x, size.height * y), size.width * r))
+    if (dark) { glow(Color(0xFF12A58D).copy(alpha = .75f), .12f, .06f, 1.0f); glow(Color(0xFFC98A1A).copy(alpha = .55f), 1.0f, .40f, .85f); glow(Color(0xFF1F6F8F).copy(alpha = .7f), .08f, .95f, 1.1f) }
+    else { glow(Color(0xFF8FE3D1).copy(alpha = .85f), .12f, .06f, 1.0f); glow(Color(0xFFFFDC96).copy(alpha = .8f), 1.0f, .40f, .85f); glow(Color(0xFFAFD6EE).copy(alpha = .85f), .08f, .95f, 1.1f) }
+}
+
+/** The lit edge of a pane of glass: bright along the top, fading down the sides. Nothing in the classic look. */
 @Composable
-fun AppTheme(content: @Composable () -> Unit) {
+fun Modifier.glassEdge(shape: androidx.compose.ui.graphics.Shape): Modifier {
+    val p = LocalPal.current
+    if (!p.glass) return this
+    val dark = p.ink.red > .5f
+    return border(1.dp, Brush.verticalGradient(if (dark) listOf(Color(0x66FFFFFF), Color(0x14FFFFFF)) else listOf(Color(0xFFFFFFFF), Color(0x59FFFFFF))), shape)
+}
+
+@Composable
+fun AppTheme(glass: Boolean = false, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
-    val p = if (dark) DarkPal else LightPal
+    val p = if (glass) { if (dark) GlassDark else GlassLight } else if (dark) DarkPal else LightPal
     val base = if (dark) darkColorScheme() else lightColorScheme()
     val scheme = base.copy(
-        primary = p.accent, onPrimary = p.accentInk, background = p.bg, onBackground = p.ink, surface = p.surface, onSurface = p.ink,
+        primary = p.accent, onPrimary = p.accentInk, background = p.bg, onBackground = p.ink, surface = p.solid, onSurface = p.ink,
         surfaceVariant = p.surface2, onSurfaceVariant = p.muted, outline = p.line, outlineVariant = p.line,
-        secondaryContainer = p.goodBg, onSecondaryContainer = p.goodInk, surfaceContainer = p.surface, surfaceContainerHigh = p.surface,
+        secondaryContainer = p.goodBg, onSecondaryContainer = p.goodInk, surfaceContainer = p.solid, surfaceContainerHigh = p.solid,
         surfaceContainerHighest = p.surface2, error = p.danger, primaryContainer = p.goodBg, onPrimaryContainer = p.goodInk,
     )
     val body = TextStyle(fontFamily = BodyFont, fontSize = 16.sp, lineHeight = 23.sp)
@@ -91,7 +129,8 @@ fun AppTheme(content: @Composable () -> Unit) {
 fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val p = LocalPal.current
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.surface).border(1.dp, p.line, RoundedCornerShape(14.dp)).padding(16.dp),
+        (if (p.glass) modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(p.surface).glassEdge(RoundedCornerShape(22.dp))
+        else modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.surface).border(1.dp, p.line, RoundedCornerShape(14.dp))).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp), content = content,
     )
 }

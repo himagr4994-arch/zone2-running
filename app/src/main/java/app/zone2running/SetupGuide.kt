@@ -134,6 +134,15 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
     }
 
     if (sub == "") Panel {
+        Head("Look")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Pick("Glass", s.look == "glass", Modifier.weight(1f)) { vm.updateSettings { it.copy(look = "glass") } }
+            Pick("Classic", s.look != "glass", Modifier.weight(1f)) { vm.updateSettings { it.copy(look = "classic") } }
+        }
+        Small("Classic has solid cards, which are easier to read in bright sun.")
+    }
+
+    if (sub == "") Panel {
         Head("Units")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Pick("Kilometres", !s.miles, Modifier.weight(1f)) { vm.updateSettings { it.copy(miles = false) } }
@@ -200,6 +209,16 @@ fun SetupScreen(vm: AppVM, e: Engine, replayIntro: () -> Unit, rerunGuide: () ->
         Head("Motivation")
         Toggle("Levels, streaks, quests and badges", "Turn off for a calmer app: progress, plan and coaching only.", s.gameOn) { v -> vm.updateSettings { it.copy(gameOn = v) } }
         ReminderPicker(s.remindOn, s.remindMin) { on, m -> vm.setReminder(on, m) }
+        if (s.remindOn) {
+            val usual = e.usualRunMin
+            Toggle("Time it to my runs", if (usual != null) "Arrives about ${fmtClock(e.nudgeMin.let { if (s.remindSmart) it else maxOf(240, usual - 45) })}, 45 minutes before you usually head out." else "Needs three runs at a similar hour. Until then it uses the time above.", s.remindSmart) { v -> vm.setRemindStyle(smart = v) }
+            Toggle("A second nudge if I haven't run", "Once, two hours after your usual time. Never more than two a day.", s.remindLate) { v -> vm.setRemindStyle(late = v) }
+            if (android.os.Build.MANUFACTURER.lowercase() in setOf("xiaomi", "redmi", "poco")) {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                NoteBox(Note("plain", "Xiaomi phones often stop apps from waking up, so reminders can go missing. In the app's settings, switch on Autostart and set Battery saver to No restrictions."))
+                Btn("Open the app's settings", ghost = true, small = true) { try { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}"))) } catch (x: Exception) { } }
+            }
+        }
     }
 
     if (sub == "connect") Panel {
@@ -316,7 +335,7 @@ fun ReminderPicker(on: Boolean, minutes: Int, onChange: (Boolean, Int) -> Unit) 
             }
         }
         if (minutes !in listOf(360, 390, 420, 1080, 1140, 1200)) Small("Set for ${fmtClock(minutes)}, an hour before you usually run.", LocalPal.current.ink)
-        NoteBox(Note("plain", "Preview: “Today: Easy run · 40 min. Keep HR in Zone 2.”"))
+        NoteBox(Note("plain", "Preview: “Easy run today · 40 min. You usually head out around 7 am.”"))
     }
     if (denied) Small("Notifications are blocked for this app. You can allow them in Android settings.")
 }

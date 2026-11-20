@@ -26,9 +26,10 @@ object Json {
             .put("snoozed", JSONObject().also { o -> s.snoozed.forEach { (k, v) -> o.put(k, v.toString()) } })
             .put("miles", s.miles).put("raceName", s.raceName).put("raceDate", s.raceDate?.toString() ?: "").put("raceKm", s.raceKm)
             .put("overrides", JSONObject().also { o -> s.overrides.forEach { (k, v) -> o.put(k.toString(), v) } })
+            .put("sick", JSONArray(s.sick.map { it.toString() }))
             .put("weatherOn", s.weatherOn).put("city", s.city).put("lat", s.lat).put("lon", s.lon)
             .put("voiceOn", s.voiceOn).put("sensorAddr", s.sensorAddr).put("sensorName", s.sensorName)
-            .put("updateCheck", s.updateCheck).put("disclaimerOk", s.disclaimerOk).put("seenPace", s.seenPace)
+            .put("look", s.look).put("remindSmart", s.remindSmart).put("remindLate", s.remindLate).put("updateCheck", s.updateCheck).put("disclaimerOk", s.disclaimerOk).put("seenPace", s.seenPace)
             .put("beepsOn", s.beepsOn).put("mapTiles", s.mapTiles).put("hcRest", s.hcRest).put("talkHr", s.talkHr).put("runWalk", s.runWalk).put("caution", s.caution).put("hrMeds", s.hrMeds)
         val ra = JSONArray()
         for (r in d.runs) ra.put(
@@ -61,13 +62,14 @@ object Json {
             gameOn = so.optBoolean("gameOn", true), autoImport = so.optBoolean("autoImport", true),
             backupTree = so.optString("backupTree"), lastBackup = so.optString("lastBackup"),
             introSeen = so.optBoolean("introSeen", so.optBoolean("onboarded", false)), goalWeeks = so.optInt("goalWeeks", 8),
+            sick = strings(so.optJSONArray("sick")).mapNotNull { date(it) },
             breakWeeks = strings(so.optJSONArray("breakWeeks")).mapNotNull { date(it) }, lessonsDone = strings(so.optJSONArray("lessonsDone")),
             remindOn = so.optBoolean("remindOn", false), remindMin = so.optInt("remindMin", 390),
             miles = so.optBoolean("miles", false), raceName = so.optString("raceName"), raceDate = date(so.optString("raceDate")), raceKm = so.optDouble("raceKm", 0.0),
             overrides = so.optJSONObject("overrides")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(k)?.let { it to o.optString(k) } }.toMap() } ?: emptyMap(),
             weatherOn = so.optBoolean("weatherOn", false), city = so.optString("city"), lat = so.optDouble("lat", 0.0), lon = so.optDouble("lon", 0.0),
             voiceOn = so.optBoolean("voiceOn", true), sensorAddr = so.optString("sensorAddr"), sensorName = so.optString("sensorName"),
-            seenPace = so.optInt("seenPace", 0), talkHr = so.optInt("talkHr", 0), beepsOn = so.optBoolean("beepsOn", true), mapTiles = so.optBoolean("mapTiles", false), hcRest = so.optInt("hcRest", 0), runWalk = so.optBoolean("runWalk", false), caution = so.optBoolean("caution", false), hrMeds = so.optBoolean("hrMeds", false), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
+            look = so.optString("look", "glass"), remindSmart = so.optBoolean("remindSmart", true), remindLate = so.optBoolean("remindLate", true), seenPace = so.optInt("seenPace", 0), talkHr = so.optInt("talkHr", 0), beepsOn = so.optBoolean("beepsOn", true), mapTiles = so.optBoolean("mapTiles", false), hcRest = so.optInt("hcRest", 0), runWalk = so.optBoolean("runWalk", false), caution = so.optBoolean("caution", false), hrMeds = so.optBoolean("hrMeds", false), updateCheck = so.optBoolean("updateCheck", false), disclaimerOk = so.optBoolean("disclaimerOk", so.optBoolean("onboarded", false)),
             snoozed = so.optJSONObject("snoozed")?.let { o -> o.keys().asSequence().mapNotNull { k -> date(o.optString(k))?.let { k to it } }.toMap() } ?: emptyMap(),
         )
         val ra = o.optJSONArray("runs") ?: JSONArray()

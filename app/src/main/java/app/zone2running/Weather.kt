@@ -106,7 +106,7 @@ fun WeatherStrip(w: WeatherCache, city: String, today: LocalDate, now: LocalTime
         else -> "good" to "Good conditions for an easy run."
     }
     val shape = RoundedCornerShape(18.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(p.surface).border(1.dp, p.line, shape).clickable { more = !more }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).background(p.surface).then(if (p.glass) Modifier.glassEdge(shape) else Modifier.border(1.dp, p.line, shape)).clickable { more = !more }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { Label("${city.substringBefore(",").ifBlank { "Weather" }} · now") }
             val age = (System.currentTimeMillis() - w.fetchedAt) / 3600_000L

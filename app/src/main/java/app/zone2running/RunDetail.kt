@@ -56,7 +56,7 @@ fun RunCharts(e: Engine, r: Run, d: Debrief) {
             r.pace.getOrNull(i)?.takeIf { it > 0 }?.let { "${fmtPace(it.toDouble())} ${U.per}" }, block?.step?.label).joinToString("  ·  "),
             fontFamily = BodyFont, fontWeight = if (i == null) FontWeight.Normal else FontWeight.SemiBold, fontSize = 15.sp, color = if (i == null) p.muted else p.ink, maxLines = 1)
 
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).padding(vertical = 12.dp).then(gesture)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).glassEdge(RoundedCornerShape(16.dp)).padding(vertical = 12.dp).then(gesture)) {
             HeartCanvas(e, r, d, at, Modifier.fillMaxWidth().height(210.dp))
             if (r.pace.count { it > 0 } >= 12) {
                 Text("PACE", Modifier.padding(start = 12.dp, top = 10.dp), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, letterSpacing = 1.sp, color = p.muted)
@@ -156,7 +156,7 @@ fun BlockRows(e: Engine, blocks: List<BlockStat>) {
     // "Jog" eight times over says nothing: number the blocks that share a name.
     val seen = HashMap<String, Int>()
     val names = blocks.map { b -> val n = b.step.label.substringBefore(". "); if (blocks.count { it.step.label.substringBefore(". ") == n } > 1) "$n ${seen.merge(n, 1, Int::plus)}" else n }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.surface).glassEdge(RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 6.dp)) {
         var first = true
         while (i < blocks.size) {
             val b = blocks[i]; val nx = blocks.getOrNull(i + 1)
@@ -206,7 +206,7 @@ fun ZoneRows(e: Engine, zoneSec: List<Int>) {
 @Composable
 fun FactTile(f: Fact, modifier: Modifier) {
     val p = LocalPal.current
-    Column(modifier.clip(RoundedCornerShape(14.dp)).background(p.surface).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier.clip(RoundedCornerShape(14.dp)).background(p.surface).glassEdge(RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(f.label.uppercase(), fontFamily = BodyFont, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, letterSpacing = 1.sp, color = p.muted, maxLines = 1)
         Text(f.value, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 28.sp, color = p.ink, maxLines = 1)
         if (f.note.isNotEmpty()) Text(f.note, fontFamily = BodyFont, fontSize = 13.sp, lineHeight = 17.sp, color = p.muted, maxLines = 2)

@@ -34,6 +34,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,10 +49,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Respect the phone's "remove animations" setting.
         Motion.on = Global.getFloat(contentResolver, Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
-        setContent { AppTheme { App(vm) } }
+        if (intent?.getBooleanExtra("start", false) == true) Launch.start = true
+        setContent { AppTheme(vm.settings.look == "glass") { App(vm) } }
     }
 
-    override fun onResume() { super.onResume(); vm.refreshHealth() }
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); if (intent.getBooleanExtra("start", false)) Launch.start = true }
+
+    // An answer tapped on a notification is written while the app sleeps, so read the file again on the way back in.
+    override fun onResume() { super.onResume(); vm.reload(); vm.refreshHealth(); if (vm.settings.remindOn) Reminders.schedule(this, vm.data) }
 }
 
 /** What the run form opens with: an existing run to edit, or a date and type to pre-fill. */
@@ -83,6 +88,11 @@ fun App(vm: AppVM) {
             if (run.distKm >= 0.1) vm.saveRun(run, isNew = true) else form = FormSeed(run = run, fresh = true) }
     }
 
+    // "Start run" on a notification lands on the briefing for today's run.
+    LaunchedEffect(Launch.start) {
+        if (Launch.start) { Launch.start = false; if (vm.settings.onboarded && !Live.snap.active) live = e.weekPlan(mondayOf(e.today)).ses[e.today.dayOfWeek.value]?.takeIf { e.runsOn(e.today).isEmpty() } ?: e.freeRun() }
+    }
+
     // A discarded run goes back home, not to the briefing it started from.
     var wasLive by remember { mutableStateOf(false) }
     LaunchedEffect(Live.snap.active) { if (wasLive && !Live.snap.active) live = null; wasLive = Live.snap.active }
@@ -107,7 +117,7 @@ fun App(vm: AppVM) {
         }
     }
 
-    Scaffold(containerColor = if (Live.snap.active && reward == null && form == null) liveGround(e) else p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(pager.currentPage, go) }) { pad ->
+    Scaffold(Modifier.glassField(p), containerColor = if (Live.snap.active && reward == null && form == null) liveGround(e) else if (p.glass) Color.Transparent else p.bg, snackbarHost = { SnackbarHost(snack) }, bottomBar = { if (chrome) TabBar(pager.currentPage, go) }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
             when {
                 guide -> Page { Onboarding(vm, canClose = vm.settings.onboarded) { rerunGuide = false } }
@@ -160,7 +170,7 @@ fun TabBar(tab: Int, onTab: (Int) -> Unit) {
     val p = LocalPal.current
     val tick = haptic()
     Column(Modifier.background(p.surface).navigationBarsPadding()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(p.line))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(if (p.glass) Color.White.copy(alpha = if (p.ink.red > .5f) .3f else .9f) else p.line))
         Row(Modifier.padding(vertical = 6.dp)) {
             TABS.forEachIndexed { i, (name, glyph) ->
                 val on = i == tab

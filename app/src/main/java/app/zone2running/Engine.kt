@@ -130,10 +130,14 @@ data class Settings(
     val lessonsDone: List<String> = emptyList(),
     val remindOn: Boolean = false,
     val remindMin: Int = 390,                  // minutes after midnight
+    val look: String = "glass",                // "glass" or "classic"
+    val remindSmart: Boolean = true,           // time the reminder to the hour the runner usually heads out, once that is known
+    val remindLate: Boolean = true,            // one follow-up when the usual time passes without a run
     val snoozed: Map<String, LocalDate> = emptyMap(), // suggestions the runner said "not now" to, and when
     val miles: Boolean = false,
     val raceName: String = "", val raceDate: LocalDate? = null, val raceKm: Double = 0.0,
     val overrides: Map<LocalDate, String> = emptyMap(),   // a day's session swapped by hand: a session kind, or "skip"
+    val sick: List<LocalDate> = emptyList(),               // days skipped for illness or a niggle; the next run after one is kept short and easy
     val weatherOn: Boolean = false, val city: String = "", val lat: Double = 0.0, val lon: Double = 0.0,
     val voiceOn: Boolean = true, val sensorAddr: String = "", val sensorName: String = "",
     val updateCheck: Boolean = false, val disclaimerOk: Boolean = false,
@@ -148,7 +152,17 @@ data class Settings(
 )
 
 data class Session(val type: String, val title: String, val min: Int, val detail: String, val kind: String = type)
-data class WeekPlan(val wi: Int, val pos: Int, val ses: Map<Int, Session>, val total: Int, val phase: String)
+data class WeekPlan(val wi: Int, val pos: Int, val ses: Map<Int, Session>, val total: Int, val phase: String, val note: String = "")
+/** One notification: its two lines, what kind it is (run, back, free, late, streak), the session it is about, and the missed day it answers. */
+data class Nudge(val title: String, val body: String, val kind: String, val session: Session? = null, val missed: LocalDate? = null)
+/** Coming back after a week or more without a run: how many days the gap was, and the day running resumed (today, while still away). */
+data class Comeback(val gap: Int, val from: LocalDate)
+/**
+ * A planned session that went by without a run, and the way forward: [head] says it in a few words, [why] in one short line.
+ * [todays] is the session already planned for today, if there is one, since running it is the best answer to a missed day.
+ * Otherwise [moveTo] is the one day the missed session could sensibly go to, which is today whenever today is free.
+ */
+data class Missed(val date: LocalDate, val session: Session, val moveTo: LocalDate?, val why: String, val head: String = "", val todays: Session? = null)
 data class Span(val easy: Double, val hard: Double, val km: Double, val n: Int)
 data class WeekHit(val need: Int, val planned: Int, val n: Int, val hit: Boolean, val s: Span)
 data class Progress(val have: Double, val need: Double, val unit: String)
@@ -459,10 +473,12 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     private val weekCalc: Pair<List<WeekRec>, Int> by lazy {
         val cur = mondayOf(today); val ps = mondayOf(planStart)
         var m = runs.firstOrNull()?.let { mondayOf(it.date) }?.takeIf { !it.isAfter(cur) } ?: cur
-        var idx = 0; var passes = 1; var hits = 0
+        var idx = 0; var passes = 1; var hits = 0; var empty = 0
         val out = ArrayList<WeekRec>()
         while (!m.isAfter(cur)) {
             val sp = span(m, m.plusDays(7))
+            // Four weeks or more with no running costs roughly a block's worth of fitness, so the plan steps back one and rebuilds.
+            if (sp.n == 0) empty++ else { if (empty >= 4) idx = max(0, idx - 4); empty = 0 }
             val st = when {
                 sp.n >= weekNeed -> WeekState.HIT
                 m in breakSet -> WeekState.BREAK
@@ -485,6 +501,114 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     }
 
     fun onBreak(mon: LocalDate) = mon in breakSet
+
+    /**
+     * The most recent gap of a week or more, while its return is still being managed. Under a week away needs nothing:
+     * studies find no measurable loss of aerobic fitness in that time.
+     */
+    val comeback: Comeback? by lazy {
+        val dates = runs.map { it.date }.distinct().filter { !it.isAfter(today) }
+        val last = dates.lastOrNull() ?: return@lazy null
+        val away = ChronoUnit.DAYS.between(last, today).toInt()
+        if (away >= 7) return@lazy Comeback(away, today)
+        for (i in dates.size - 1 downTo 1) {
+            if (ChronoUnit.DAYS.between(dates[i], today) > 28) break
+            val g = ChronoUnit.DAYS.between(dates[i - 1], dates[i]).toInt()
+            if (g >= 7) return@lazy Comeback(g, dates[i])
+        }
+        null
+    }
+
+    /**
+     * How a week is eased after time away: (share of the usual minutes, 2 = every run easy / 1 = strides in place of the hard session, a line for the runner).
+     * 7 to 13 days: fitness is intact, the legs need one gentle week. 14 to 27: aerobic capacity is down a few percent, so two stepped weeks.
+     * 28 or more: closer to ten percent, so three, on top of the plan stepping back a block. The timings come from detraining studies;
+     * the percentages are coaching convention, since no trial has compared return schedules.
+     */
+    private fun easeIn(mon: LocalDate): Triple<Double, Int, String>? {
+        val c = comeback ?: return null
+        val w = (ChronoUnit.DAYS.between(mondayOf(c.from), mon) / 7).toInt()
+        if (w < 0) return null
+        val back = "Back after ${c.gap} days off"
+        return when {
+            c.gap < 14 -> if (w == 0) Triple(1.0, 1, "$back. Your fitness is intact: same week, no hard session.") else null
+            c.gap < 28 -> when (w) {
+                0 -> Triple(.7, 2, "$back. This week is shorter and all easy. The plan builds back over two weeks.")
+                1 -> Triple(.85, 1, "Second week back: a little shorter, no hard session. Back to full next week.")
+                else -> null
+            }
+            else -> when (w) {
+                0 -> Triple(.6, 2, "$back. This week is much shorter and all easy. The plan builds back over three weeks.")
+                1 -> Triple(.7, 2, "Second week back: still short and all easy.")
+                2 -> Triple(.85, 1, "Third week back: a little shorter, no hard session. Back to full next week.")
+                else -> null
+            }
+        }
+    }
+
+    private val KEY_TYPES = setOf("long", "intervals", "tempo")
+    private val HEAVY_TYPES = setOf("long", "intervals", "tempo", "race")
+
+    /** Is this day already a demanding one, by what was run or what is still planned? */
+    private fun heavy(d: LocalDate): Boolean {
+        val planned = weekPlan(mondayOf(d)).ses[d.dayOfWeek.value]
+        val rs = runsOn(d)
+        return if (rs.isNotEmpty()) rs.any { !isEasy(it) } || planned?.type == "long" else !d.isBefore(today) && planned?.type in HEAVY_TYPES
+    }
+
+    /**
+     * What to do about a planned session that went by with no run. The aim is the next run, not the lost one:
+     * if a run is planned today, that is the answer. If today is free, the missed run can simply happen a day late.
+     * The week's long run or hard session can also wait for a later free day in the same week, as long as no demanding
+     * day sits either side of it. Nothing is ever stacked onto a day that already has a run.
+     */
+    fun missedOn(d: LocalDate): Missed? {
+        val mon = mondayOf(d)
+        if (!d.isBefore(today) || runs.isEmpty() || onBreak(mon) || s.overrides[d] == "skip" || runsOn(d).isNotEmpty()) return null
+        if (comeback?.from == today && runsOn(today).isEmpty()) return null              // away for a week or more: the return plan covers it, session by session would be nagging
+        val plan = weekPlan(mon); val x = plan.ses[d.dayOfWeek.value] ?: return null
+        val thisWeek = weekPlan(mondayOf(today))
+        val ranToday = runsOn(today).isNotEmpty()
+        val todays = thisWeek.ses[today.dayOfWeek.value]?.takeIf { !ranToday }
+        if (todays != null) return Missed(d, x, null, "One missed run costs no fitness. Today's run puts you straight back on track.", "Today still counts", todays)
+        val key = x.type in KEY_TYPES
+        val open = { t: LocalDate -> thisWeek.ses[t.dayOfWeek.value] == null && runsOn(t).isEmpty() && s.overrides[t] != "skip" && !onBreak(mondayOf(t)) }
+        val to = when {
+            !key -> today.takeIf { open(it) && afterSick == null }
+            mon != mondayOf(today) -> null
+            else -> (0..6).map { mon.plusDays(it.toLong()) }.firstOrNull { t -> !t.isBefore(today) && open(t) && !heavy(t.minusDays(1)) && !heavy(t.plusDays(1)) }
+        }
+        val day = to?.let { DAY_NAMES[it.dayOfWeek.value - 1] }
+        return when {
+            to == today -> Missed(d, x, to, if (key) "Today is free, with an easier day either side." else "Today is free. A day late is as good as on time.", "Run it today?")
+            to != null -> Missed(d, x, to, "$day is free, with an easier day either side.", "Move it to $day?")
+            else -> {
+                val next = (1L..7L).map { today.plusDays(it) }.firstOrNull { weekPlan(mondayOf(it)).ses[it.dayOfWeek.value] != null }
+                Missed(d, x, null, if (key && mon == mondayOf(today)) "No good day left this week. Better dropped than squeezed in." else "Nothing to make up.",
+                    next?.let { "Next run: ${DAY_NAMES[it.dayOfWeek.value - 1]}" } ?: "Nothing to make up")
+            }
+        }
+    }
+
+    /**
+     * The latest session missed in the last three days that still needs an answer. One question only:
+     * once the most recent miss has been answered, or the runner has run since, older ones are not raised.
+     */
+    fun missed(): Missed? {
+        for (i in 1L..3L) {
+            val d = today.minusDays(i)
+            if (s.overrides[d] == "skip" || runsOn(d).isNotEmpty()) return null       // already answered, or already back out running since
+            missedOn(d)?.let { return it }
+        }
+        return null
+    }
+
+    /** The first day with a run planned after a day marked unwell, as long as nothing has been run since. */
+    private val afterSick: LocalDate? by lazy {
+        val sd = s.sick.filter { !it.isAfter(today) }.maxOrNull() ?: return@lazy null
+        if (ChronoUnit.DAYS.between(sd, today) > 10 || runs.any { it.date.isAfter(sd) }) return@lazy null
+        (0L..13L).map { maxOf(today, sd.plusDays(1)).plusDays(it) }.firstOrNull { d -> s.overrides[d].let { o -> if (o != null) o != "skip" else d.dayOfWeek.value in s.days } }
+    }
 
     /** Three small goals for the week, each worth XP. */
     fun quests(mon: LocalDate): List<Quest> {
@@ -550,7 +674,9 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         val inTaper = weeksToRace != null && weeksToRace < taperWeeks
         // Volume comes down in steps to roughly half; the number of runs and their intensity stay.
         val taper = if (!inTaper) 1.0 else when (taperWeeks) { 1 -> listOf(.6); 2 -> listOf(.55, .75); else -> listOf(.5, .65, .8) }[weeksToRace!!]
-        val f = min(1.8, 1.12.pow(block)) * listOf(1.0, 1.08, 1.16, .85)[pos] * taper
+        val ease = if (weeksToRace == 0) null else easeIn(mon)
+        val gentle = ease?.second ?: 0
+        val f = min(1.8, 1.12.pow(block)) * listOf(1.0, 1.08, 1.16, .85)[pos] * taper * (ease?.first ?: 1.0)
         val r5 = { x: Double -> max(20, (x / 5).roundToInt() * 5) }
         val longCap = if (race == null) 150 else when { s.raceKm <= 5 -> 60; s.raceKm <= 10 -> 90; s.raceKm <= 21.1 -> 130; else -> 180 }
         val easy = min(75, r5(s.easyMin * f)); val long = min(longCap, r5(s.longMin * f))
@@ -560,11 +686,11 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         if (days.isNotEmpty()) {
             val longDay = if (s.longDay in days) s.longDay else days.last()
             val others = days.filter { it != longDay }
-            val testDay = if (pos == 3) others.firstOrNull { it != q } else null
+            val testDay = if (pos == 3 && gentle < 2) others.firstOrNull { it != q } else null
             for (d in days) ses[d] = when (d) {
                 longDay -> build("long", easy, long)
                 testDay -> build("test", easy, long)
-                q -> build(if (inTaper) "tune" else if (pos == 3) "strides" else listOf("4x4", "tempo", "6x3")[wi % 3], easy, long)
+                q -> build(if (gentle == 2) "easy" else if (inTaper) "tune" else if (pos == 3 || gentle == 1) "strides" else listOf("4x4", "tempo", "6x3")[wi % 3], easy, long)
                 else -> when {
                     easyOver == 2 || s.runWalk -> build("runwalk", easy, long).let { if (easyOver == 2) it.copy(detail = it.detail + " Your recent easy days spent a lot of time above ${zb[2] - 1} bpm, so this week builds the habit of staying low.") else it }
                     easyOver == 1 -> build("easy", easy, long).let { it.copy(detail = it.detail + " Your last few easy days ran above ${zb[2] - 1} bpm: slow down first, and walk the hills." + if (s.talkHr == 0 && s.zoneMethod != "custom") " If that feels like a crawl, the ceiling itself may be off. A talk test checks it." else "") }
@@ -578,13 +704,19 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
             ses[rd] = build("race", easy, long)
         }
         for (d in 1..7) s.overrides[mon.plusDays(d - 1L)]?.let { if (it == "skip") ses.remove(d) else ses[d] = build(it, easy, long) }
+        afterSick?.takeIf { mondayOf(it) == mon }?.let { d ->
+            ses[d.dayOfWeek.value]?.takeIf { it.type != "race" }?.let { x ->
+                ses[d.dayOfWeek.value] = build("easy", easy, long).copy(min = max(20, min(30, (x.min * .6 / 5).roundToInt() * 5)),
+                    detail = "Short and easy on purpose: it's your first run after being unwell. Stop if anything feels off, and give it more days if you still have a fever, a chesty cough or pain.")
+            }
+        }
         for ((d, x) in ses.toMap()) if (x.type in setOf("easy", "long")) runCap(mon.plusDays(d - 1L))?.let { cap ->
-            if (cap < 0) { val m = max(20, (x.min * .6 / 5).roundToInt() * 5); if (m < x.min) ses[d] = x.copy(min = m, detail = x.detail + " Kept short on purpose: it's your first month back after a break.") }
+            if (cap < 0) { if (ease != null) return@let; val m = max(20, (x.min * .6 / 5).roundToInt() * 5); if (m < x.min) ses[d] = x.copy(min = m, detail = x.detail + " Kept short on purpose: it's your first month back after a break.") }
             else if (x.min > cap) ses[d] = x.copy(min = cap, detail = x.detail + " Kept to $cap min: about 10% more than your longest run of the last 30 days. Bigger jumps than that are where injuries come from.")
         }
         val sorted = ses.toSortedMap()
-        val phase = when { weeksToRace == 0 -> "Race week"; inTaper -> "Taper"; else -> listOf("Build 1", "Build 2", "Build 3", "Recovery + test")[pos] }
-        return WeekPlan(wi, pos, sorted, sorted.values.sumOf { it.min }, phase)
+        val phase = when { weeksToRace == 0 -> "Race week"; inTaper -> "Taper"; ease != null -> "Easing back in"; else -> listOf("Build 1", "Build 2", "Build 3", "Recovery + test")[pos] }
+        return WeekPlan(wi, pos, sorted, sorted.values.sumOf { it.min }, phase, ease?.third ?: "")
     }
 
     /**
@@ -660,12 +792,24 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         }
         val pick = efforts.minBy { it.sec * (s.raceKm / it.km).pow(k) }
         val t = pick.sec * (s.raceKm / pick.km).pow(k)
-        val warn = when {
+        var warn = when {
             long && weekKm < 40 -> "Marathon forecasts from shorter runs come out optimistic on less than ${U.dist(40.0, 0)} a week. Treat the slow end as the likely one."
             pick.km < s.raceKm / 4 -> "This comes from a much shorter effort, so the range is wide."
             else -> ""
         }
-        return RaceCast(t.roundToInt(), (t * .97).roundToInt(), (t * if (long) 1.07 else if (pick.km < s.raceKm / 4) 1.06 else 1.04).roundToInt(),
+        // Can the long run still get long enough? It may only grow about 10% a week, so missed weeks close this door quietly.
+        var slack = 1.0
+        s.raceDate?.takeIf { s.raceKm >= 15 && !it.isBefore(today) }?.let { rd ->
+            val longest = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 0..30 }.maxOfOrNull { it.durSec }?.div(60.0) ?: 0.0
+            val buildWeeks = max(0, (ChronoUnit.DAYS.between(mondayOf(today), mondayOf(rd)) / 7).toInt() - taperWeeks + 1)
+            val reach = max(longest * 1.1, longest + 5) .let { first -> if (buildWeeks == 0) longest else first * 1.1.pow(buildWeeks - 1) }
+            val want = min(if (s.raceKm <= 21.1) 130.0 else 180.0, t / 60 * .75)
+            if (longest > 0 && reach < want * .9) {
+                slack = 1.03
+                warn = (if (warn.isEmpty()) "" else "$warn ") + "Your long run will reach about ${(reach / 5).roundToInt() * 5} min by race day; about ${(want / 5).roundToInt() * 5} is usual. Start slower than this pace."
+            }
+        }
+        return RaceCast(t.roundToInt(), (t * .97).roundToInt(), (t * slack * if (long) 1.07 else if (pick.km < s.raceKm / 4) 1.06 else 1.04).roundToInt(),
             "your best ${U.dist(pick.km, if (pick.km % 1.0 == 0.0) 0 else 1)} on ${fmtDay(pick.date)}" + if (own) ", and how you fade over distance" else "", warn)
     }
     fun racePrediction(): Int? = raceCast()?.sec
@@ -949,18 +1093,45 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         return Review(w.mon, w.state, w.span.n, plannedCount, share, w.span.km, line)
     }
 
-    /** What the daily reminder should say, or null when there is nothing worth a notification. */
-    fun reminder(): Pair<String, String>? {
+    /**
+     * When the day's notification should arrive, in minutes after midnight: 45 minutes before the hour the runner usually heads out,
+     * once there are enough runs at a consistent time to know it. Until then, or when that is switched off, the time they picked.
+     */
+    val nudgeMin: Int get() = if (s.remindSmart) usualRunMin?.let { max(240, it - 45) } ?: s.remindMin else s.remindMin
+
+    /** When the one follow-up goes out, if the day's run still hasn't happened: two hours after the usual time, and never late at night. */
+    val lateMin: Int? get() = if (!s.remindLate) null else ((usualRunMin ?: (s.remindMin + 45)) + 120).takeIf { it <= 21 * 60 + 30 }
+
+    /**
+     * What the notification says, or null when there is nothing worth one. The day after a missed run it is about getting back out;
+     * otherwise it names today's session. [late] is the follow-up once the usual time has passed.
+     */
+    fun nudge(late: Boolean = false): Nudge? {
         val mon = mondayOf(today)
-        if (onBreak(mon)) return null
+        if (onBreak(mon) || runsOn(today).isNotEmpty()) return null
         val ses = weekPlan(mon).ses[today.dayOfWeek.value]
-        if (ses != null && runsOn(today).isEmpty()) return "Today: ${ses.title} · ${ses.min} min" to ses.detail.substringBefore(". ") + "."
+        val gone = missedOn(today.minusDays(1))
         val w = weekHit(mon); val left = w.need - w.n; val daysLeft = 8 - today.dayOfWeek.value
+        val atRisk = left > 0 && left >= daysLeft
         val g = game
-        if (left > 0 && left >= daysLeft && runsOn(today).isEmpty())
-            return (if (g.streak > 0) "Your ${g.streak}-week streak is on the line" else "This week's goal is still open") to "$left more run${if (left == 1) "" else "s"} this week does it. An easy 20 minutes counts."
+        if (late) {
+            val run = ses ?: gone?.takeIf { it.moveTo == today }?.session
+            if (run == null && !atRisk) return null
+            return Nudge("Still time today", if (g.streak > 0) "20 easy minutes keeps your ${g.streak}-week streak going." else "A short easy run still counts for this week.", "late", run)
+        }
+        gone?.let { m ->
+            if (m.todays != null) return Nudge("Yesterday's gone. Today still counts.", "${m.todays.title}, ${m.todays.min} min. One missed run costs no fitness.", "back", m.todays, m.date)
+            if (m.moveTo == today) return Nudge("Missed yesterday? Today is free.", "${m.session.title}, ${m.session.min} min. A day late is as good as on time.", "free", m.session, m.date)
+        }
+        if (ses != null) {
+            val usual = usualRunMin?.let { "You usually head out around ${fmtClock(it)}." } ?: ""
+            val temp = wx?.at(today, usualRunMin ?: nudgeMin)?.let { "It's ${it.first.roundToInt()}° out." } ?: ""
+            return Nudge("${ses.title} today · ${ses.min} min", listOf(usual, temp).filter { it.isNotEmpty() }.joinToString(" ").ifEmpty { ses.detail.substringBefore(". ") + "." }, "run", ses)
+        }
+        if (atRisk) return Nudge(if (g.streak > 0) "Your ${g.streak}-week streak is on the line" else "This week's goal is still open", "$left more run${if (left == 1) "" else "s"} this week does it. An easy 20 minutes counts.", "streak")
         return null
     }
+    fun reminder(): Pair<String, String>? = nudge()?.let { it.title to it.body }
 
     /** Best guess at a run's type from its heart rate, for runs imported without a label. */
     fun guessType(durSec: Int, avgHr: Int): String {

@@ -112,9 +112,9 @@ class EngineTest {
     @Test fun reminderNamesTodaysSessionOrStaysQuiet() {
         val tue = today.plusDays(1)
         val e = Engine(s.copy(planStart = today), listOf(tenK), tue)
-        assertTrue(e.reminder()!!.first.startsWith("Today: Easy run"))
+        assertTrue(e.reminder()!!.first.startsWith("Easy run today"))
         assertNull(Engine(s.copy(planStart = today, breakWeeks = listOf(today)), listOf(tenK), tue).reminder())
-        assertNull(Engine(s.copy(planStart = today), listOf(tenK), today.plusDays(2)).reminder())   // Wednesday: rest day, week still open
+        assertNull(Engine(s.copy(planStart = today), listOf(tenK, Run("tu", tue, "easy", 5.0, 2400, 140)), today.plusDays(2)).reminder())   // Wednesday: rest day, week still open
     }
 
     @Test fun lessonsAreWellFormed() {
@@ -317,7 +317,7 @@ class EngineTest {
         assertEquals(-1, e.runCap(today.plusDays(1)))
         val p = e.weekPlan(today)
         assertEquals(40, p.ses[7]!!.min); assertEquals(25, p.ses[2]!!.min)
-        assertTrue(p.ses[7]!!.detail.contains("first month back"))
+        assertEquals("Easing back in", p.phase); assertTrue(p.note.contains("much shorter"))
     }
 
     @Test fun aLongJumpIsFlaggedButAWeeklyJumpIsNot() {
@@ -633,5 +633,121 @@ class EngineTest {
         assertEquals(160, trueAvg(r)); assertEquals(163, steady(r)!!.second)
         assertEquals(140, trueAvg(r.copy(trace = tr.take(40))))                         // a trace covering a fraction of the run isn't trusted
         assertTrue(!Engine(s, listOf(r), today).estOf(r)!!.clean)                       // at 163 it is no longer mistaken for an easy run
+    }
+
+    // ---- missed sessions and coming back ----
+
+    /** Four full weeks on the default days (Tue, Thu, Sat, Sun), ending on the Sunday [lastSunday]. */
+    private fun steadyWeeks(lastSunday: LocalDate, n: Int = 4): List<Run> = (0 until n).flatMap { w ->
+        listOf(5L to 2400, 3L to 3000, 1L to 2400, 0L to 4200).map { (back, sec) -> lastSunday.minusWeeks(w.toLong()).minusDays(back).let { Run("s$it", it, if (back == 0L) "long" else "easy", sec / 480.0, sec, 142) } }
+    }
+    private val sun = today.minusDays(1)                    // Sunday 15 Nov
+
+    @Test fun aMissedRunPointsAtTheNextOne() {
+        val wed = today.plusDays(2); val tue = today.plusDays(1)
+        // Wednesday is a rest day, so Tuesday's easy run can simply happen a day late.
+        val m = Engine(s, steadyWeeks(sun), wed).missed()!!
+        assertEquals(tue, m.date); assertEquals("easy", m.session.type); assertEquals(wed, m.moveTo); assertEquals("Run it today?", m.head); assertNull(m.todays)
+        val moved = Engine(s.copy(overrides = mapOf(tue to "skip", wed to "easy")), steadyWeeks(sun), wed)
+        assertNull(moved.missed()); assertEquals("easy", moved.weekPlan(today).ses[3]!!.type)
+        // Letting it go clears it, and so does a run logged on the day.
+        assertNull(Engine(s.copy(overrides = mapOf(tue to "skip")), steadyWeeks(sun), wed).missed())
+        assertNull(Engine(s, steadyWeeks(sun) + Run("x", tue, "easy", 5.0, 2400, 140), wed).missed())
+        assertNull(Engine(s, emptyList(), wed).missed())                                   // nothing to miss before the first run
+        // Two in a row: only the latest is asked about, and answering it settles the matter.
+        val two = s.copy(days = listOf(2, 3, 6, 7)); val fri = today.plusDays(4)
+        assertEquals(wed, Engine(two, steadyWeeks(sun), today.plusDays(3)).missed()!!.date)
+        assertNull(Engine(two.copy(overrides = mapOf(wed to "skip")), steadyWeeks(sun), today.plusDays(3)).missed())
+        // A run since then means it is already behind them.
+        assertNull(Engine(two, steadyWeeks(sun) + Run("w", wed, "easy", 5.0, 2400, 140), today.plusDays(3)).missed())
+        // By Thursday a run is planned anyway: that run is the answer, and nothing is stacked onto it.
+        val thu = Engine(s, steadyWeeks(sun), today.plusDays(3)).missed()!!
+        assertEquals(tue, thu.date); assertNull(thu.moveTo); assertEquals("Today still counts", thu.head); assertTrue(thu.todays!!.type in setOf("intervals", "tempo"))
+        // The reminder the day after speaks to it.
+        assertEquals("Missed yesterday? Today is free.", Engine(s, steadyWeeks(sun), wed).reminder()!!.first)
+        assertEquals("Yesterday's gone. Today still counts.", Engine(s, steadyWeeks(sun) + Run("tue", tue, "easy", 5.0, 2400, 140), today.plusDays(4).let { fri -> fri }).let { Engine(s.copy(days = listOf(2, 4, 5, 7)), steadyWeeks(sun) + Run("tue", tue, "easy", 5.0, 2400, 140), today.plusDays(4)).reminder()!!.first })
+    }
+
+    @Test fun aMissedHardSessionMovesOnlyToADayWithRoom() {
+        val runs = steadyWeeks(sun) + Run("tue", today.plusDays(1), "easy", 5.0, 2400, 140)
+        val fri = today.plusDays(4); val thu = today.plusDays(3); val sat = today.plusDays(5)
+        val e = Engine(s, runs, fri)
+        assertTrue(e.weekPlan(today).ses[4]!!.type in setOf("intervals", "tempo"))
+        val m = e.missed()!!
+        assertEquals(thu, m.date); assertEquals(fri, m.moveTo); assertEquals("Run it today?", m.head)      // Friday is free; Saturday after it is an easy day
+        val moved = Engine(s.copy(overrides = mapOf(thu to "skip", fri to m.session.kind)), runs, fri)
+        assertNull(moved.missed()); assertEquals(m.session.type, moved.weekPlan(today).ses[5]!!.type)
+        // With a hard day on Saturday, Friday would put two demanding days back to back: dropped, not squeezed in.
+        val tight = Engine(s.copy(overrides = mapOf(sat to "tempo")), runs, fri).missed()!!
+        assertNull(tight.moveTo); assertEquals("Next run: Saturday", tight.head); assertTrue(tight.why.contains("Better dropped"))
+        // A long run missed on Sunday is not carried into the new week.
+        val mon = Engine(s, steadyWeeks(sun.minusWeeks(1)) + Run("a", today.minusDays(6), "easy", 5.0, 2400, 140) + Run("b", today.minusDays(4), "easy", 5.0, 2400, 140), today).missed()!!
+        assertEquals(sun, mon.date); assertEquals("long", mon.session.type); assertNull(mon.moveTo); assertEquals("Next run: Tuesday", mon.head); assertEquals("Nothing to make up.", mon.why)
+    }
+
+    @Test fun theReturnIsSizedToTheGap() {
+        val normal = Engine(s, steadyWeeks(sun), today).weekPlan(today)
+        assertNull(Engine(s, steadyWeeks(sun), today.plusDays(5)).comeback)                // six days: nothing to manage
+        // Nine days: same length, strides instead of the hard session.
+        val nine = Engine(s, steadyWeeks(sun), sun.plusDays(9))
+        assertEquals(9, nine.comeback!!.gap)
+        nine.weekPlan(mondayOf(sun.plusDays(9))).let { p -> assertEquals("Easing back in", p.phase); assertTrue(p.ses.values.none { it.type in setOf("intervals", "tempo") }); assertTrue(p.ses.values.any { it.kind == "strides" }); assertTrue(p.note.contains("fitness is intact")) }
+        // Sixteen days: 70% and all easy, then 85% with strides, then back to full.
+        val d16 = sun.plusDays(16); val e16 = Engine(s, steadyWeeks(sun), d16); val m16 = mondayOf(d16)
+        val w0 = e16.weekPlan(m16); val w1 = e16.weekPlan(m16.plusWeeks(1)); val w2 = e16.weekPlan(m16.plusWeeks(2))
+        assertTrue(w0.note.contains("shorter and all easy")); assertTrue(w0.ses.values.all { it.kind in setOf("easy", "long", "runwalk") })
+        assertTrue("${w0.total} ${w1.total} ${w2.total}", w0.total < w1.total && w1.total < w2.total)
+        assertTrue(w1.ses.values.any { it.kind == "strides" } && w1.note.contains("a little shorter")); assertEquals("", w2.note)
+        assertNull(e16.missed())                                                          // no nagging about each session while away
+        // Once running again the same schedule holds, counted from the day of the first run back.
+        val back = Engine(s, steadyWeeks(sun) + Run("back", d16, "easy", 4.0, 1800, 140), d16.plusDays(2))
+        assertEquals(Comeback(16, d16), back.comeback); assertTrue(back.weekPlan(m16).note.contains("shorter and all easy"))
+        // Five weeks: the plan steps back a block as well.
+        val d37 = sun.plusDays(37); val before = Engine(s, steadyWeeks(sun, 6), sun).weeks.last().idx
+        val e37 = Engine(s, steadyWeeks(sun, 6) + Run("back", d37, "easy", 4.0, 1800, 140), d37)
+        assertTrue(e37.weekPlan(mondayOf(d37)).note.contains("much shorter")); assertTrue("${e37.weeks.last().idx} $before", e37.weeks.last().idx <= before - 3)
+        assertTrue(normal.note.isEmpty())
+    }
+
+    @Test fun theRunAfterBeingUnwellIsShortAndEasy() {
+        val thu = today.plusDays(3); val fri = today.plusDays(4)
+        val set = s.copy(overrides = mapOf(thu to "skip"), sick = listOf(thu))
+        val runs = steadyWeeks(sun) + Run("tue", today.plusDays(1), "easy", 5.0, 2400, 140)
+        val p = Engine(set, runs, fri).weekPlan(today)
+        assertNull(p.ses[4]); assertTrue(p.ses[6]!!.min <= 30 && p.ses[6]!!.detail.contains("unwell")); assertEquals("long", p.ses[7]!!.type)
+        assertNull(Engine(set, runs, fri).missed())
+        // After that first run the plan is itself again.
+        val after = Engine(set, runs + Run("x", today.plusDays(5), "easy", 3.5, 1500, 138), today.plusDays(6)).weekPlan(today)
+        assertTrue(!after.ses[7]!!.detail.contains("unwell"))
+    }
+
+    @Test fun theForecastSaysWhenTheLongRunCannotGetLongEnough() {
+        val race = s.copy(raceName = "Half", raceDate = today.plusDays(34), raceKm = 21.1)
+        val short = listOf(tenK.copy(date = today.minusDays(10)), Run("l", today.minusDays(3), "easy", 6.0, 3000, 142))
+        val c = Engine(race, short, today).raceCast()!!
+        assertTrue(c.warn, c.warn.contains("long run will reach"))
+        val ready = short + Run("l2", today.minusDays(1), "long", 13.0, 6300, 142)
+        assertTrue(!Engine(race, ready, today).raceCast()!!.warn.contains("long run will reach"))
+        assertTrue(c.hi - c.sec > Engine(race, ready, today).raceCast()!!.let { it.hi - it.sec })
+    }
+
+    @Test fun notificationsFollowTheRunnersOwnHour() {
+        // Four weeks of runs that start around seven in the morning.
+        val runs = steadyWeeks(sun).mapIndexed { i, r -> r.copy(startMin = 415 + (i % 3) * 5) }
+        val tue = today.plusDays(1)
+        val e = Engine(s.copy(remindOn = true, remindMin = 1080), runs, tue)
+        assertEquals(420, e.usualRunMin); assertEquals(375, e.nudgeMin); assertEquals(540, e.lateMin)    // 6:15, and a follow-up at 9:00
+        val n = e.nudge()!!
+        assertEquals("run", n.kind); assertTrue(n.title, n.title.startsWith("Easy run today · ")); assertTrue(n.body, n.body.contains("You usually head out around 7 am"))
+        assertEquals("Still time today", e.nudge(late = true)!!.title)
+        assertNull(Engine(s, runs + Run("x", tue, "easy", 5.0, 2400, 140), tue).nudge(late = true))        // already ran: silence
+        assertNull(Engine(s, runs, today).nudge())                                                         // Monday is a rest day with the week wide open
+        // Switched off, or with no pattern to learn from, it is the time the runner picked.
+        assertEquals(1080, Engine(s.copy(remindMin = 1080, remindSmart = false), runs, tue).nudgeMin)
+        assertEquals(1080, Engine(s.copy(remindMin = 1080), steadyWeeks(sun), tue).nudgeMin)
+        assertNull(Engine(s.copy(remindLate = false), runs, tue).lateMin)
+        // The day after a miss, the message and its kind change.
+        assertEquals("free", Engine(s, runs, today.plusDays(2)).nudge()!!.kind)
+        assertEquals("back", Engine(s.copy(days = listOf(2, 3, 6, 7)), runs, today.plusDays(2)).nudge()!!.kind)
     }
 }

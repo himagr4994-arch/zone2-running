@@ -750,4 +750,37 @@ class EngineTest {
         assertEquals("free", Engine(s, runs, today.plusDays(2)).nudge()!!.kind)
         assertEquals("back", Engine(s.copy(days = listOf(2, 3, 6, 7)), runs, today.plusDays(2)).nudge()!!.kind)
     }
+
+    // ---- from a second look at a real phone ----
+
+    @Test fun aReadingThatCannotBeRightIsSetAside() {
+        // Scaled readings around 8:20, and one run whose summary heart rate (132 at 7:19/km) would make it 5:58.
+        val runs = listOf(
+            Run("a", today.minusDays(29), "easy", 4.34, 1857, 160), Run("b", today.minusDays(25), "easy", 5.49, 2664, 145),
+            Run("c", today.minusDays(22), "tempo", 5.04, 2208, 152), Run("d", today.minusDays(21), "hard", 7.03, 2784, 165),
+            Run("odd", today.minusDays(13), "easy", 6.3, 2766, 132), Run("e", today.minusDays(12), "tempo", 5.04, 2238, 148),
+        )
+        val e = Engine(s.copy(maxHr = 186, restHr = 66, talkHr = 155), runs, today)
+        assertTrue(e.estOf(runs[4])!!.pace < 400)                                         // on its own it reads faster than 6:40
+        assertTrue(e.setAside(runs[4])); assertTrue(e.eligible.none { it.first.id == "odd" })
+        assertTrue("${e.game.bestEst}", e.game.bestEst!! > 440)                            // the record is a believable pace again
+        assertTrue(e.debrief(runs[4]).learned.any { it.text.contains("left out of your Zone 2 pace") })
+        assertTrue(e.debrief(runs[4]).facts.none { it.label == "Zone 2 reading" })
+        assertTrue(!e.setAside(runs[1]))
+        // With too few other readings to compare against, nothing is dropped.
+        assertTrue(Engine(s, runs.subList(4, 6), today).eligible.size == 2)
+    }
+
+    @Test fun aPlanThatKeepsBeingMissedOffersToShrink() {
+        // Four runs a week planned; two or so actually run, on Mondays and Wednesdays, for five weeks.
+        val runs = (1L..5L).flatMap { w -> listOf(0L, 2L).map { d -> Run("r$w$d", today.minusWeeks(w).plusDays(d), "easy", 5.0, 2400, 142) } }.filter { it.id != "r22" }
+        val e = Engine(s.copy(planStart = today.minusWeeks(5)), runs, today.plusDays(1))
+        val sg = e.suggestions().first { it.act is SetDays }
+        assertEquals("Plan for 2 runs a week?", sg.title); assertEquals(listOf(1, 3), (sg.act as SetDays).days)
+        // Once the plan matches, those same weeks count, and the offer is gone.
+        val fit = Engine(s.copy(planStart = today.minusWeeks(5), days = listOf(1, 3), longDay = 3), runs, today.plusDays(1))
+        assertTrue(fit.suggestions().none { it.act is SetDays }); assertTrue(fit.weeks.count { it.state == WeekState.HIT } >= 4)
+        // A runner who is hitting the plan is never asked.
+        assertTrue(Engine(s, steadyWeeks(sun), today.plusDays(1)).suggestions().none { it.act is SetDays })
+    }
 }

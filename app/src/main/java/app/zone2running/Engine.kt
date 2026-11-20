@@ -177,6 +177,7 @@ data class Lead(val kind: String, val mood: String, val eyebrow: String, val tit
 /** Something the app noticed in the runner's habits. It is only ever offered, never applied silently. */
 sealed interface Act
 data class MoveDay(val from: Int, val to: Int) : Act
+data class SetDays(val days: List<Int>) : Act
 data class Remind(val min: Int) : Act
 data class SetMax(val hr: Int) : Act
 data class SetRest(val hr: Int) : Act
@@ -380,7 +381,22 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
     private val basePoint: Run? = if (s.basePace > 0 && s.baseHr > 0 && s.baseDate != null)
         Run("_base", s.baseDate, "baseline", 1.0, s.basePace, s.baseHr) else null
 
-    val ests: List<Est> = (listOfNotNull(basePoint) + runs).mapNotNull { estOf(it) }.sortedBy { it.run.date }
+    private val rawEsts: List<Est> = (listOfNotNull(basePoint) + runs).mapNotNull { estOf(it) }.sortedBy { it.run.date }
+
+    /**
+     * Every run's Zone 2 reading, minus the ones that cannot be right. A reading scaled from a run's average heart rate is only as good
+     * as that average, and an app's summary figure is sometimes far off. One that sits more than 15% from the middle of the other
+     * readings within six weeks of it is set aside: fitness does not move a minute a kilometre between Tuesday and Thursday.
+     * Direct readings (a steady easy run, a Zone 2 test, a talk test) are never dropped.
+     */
+    val ests: List<Est> = rawEsts.filter { x ->
+        x.clean || run {
+            val near = rawEsts.filter { it !== x && abs(ChronoUnit.DAYS.between(it.run.date, x.run.date)) <= 42 }.map { it.pace }.sorted()
+            near.size < 3 || near[near.size / 2].let { mid -> abs(x.pace - mid) <= mid * .15 }
+        }
+    }
+    /** Was this run's reading set aside as implausible? */
+    fun setAside(r: Run) = rawEsts.any { it.run.id == r.id } && ests.none { it.run.id == r.id }
     val eligible: List<Pair<Run, Double>> = ests.map { it.run to it.pace }
 
     /**
@@ -998,6 +1014,23 @@ class Engine(val s: Settings, runsIn: List<Run>, val today: LocalDate, val wx: W
         val recent = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 1..28 }
         fun weeksRunOn(d: Int) = recent.filter { it.date.dayOfWeek.value == d }.map { mondayOf(it.date) }.distinct().size
         val planDays = s.days.distinct()
+        run {
+            // When most weeks fall short because the plan asks for more runs than happen, a smaller plan is the one that moves.
+            val closed = weeks.dropLast(1).takeLast(4)
+            val typical = closed.map { it.span.n }.sorted().let { if (it.isEmpty()) 0 else it[it.size / 2] }
+            val n = max(2, typical)
+            if (closed.size >= 3 && closed.count { it.state == WeekState.MISS || it.state == WeekState.FROZEN } >= 3 && typical >= 1 && n < planDays.size && live("fewer:$n")) {
+                val two = runs.filter { ChronoUnit.DAYS.between(it.date, today) in 0..56 }
+                val ran = { d: Int -> two.count { it.date.dayOfWeek.value == d } }
+                val gap = { a: Int, b: Int -> abs(a - b).let { min(it, 7 - it) } }
+                val pick = ArrayList<Int>()
+                // The days they already run on, spread apart: most-used first, then whichever sits furthest from the days chosen so far.
+                repeat(n) { (1..7).filter { it !in pick }.maxWithOrNull(compareBy<Int> { d -> if (pick.any { gap(it, d) <= 1 }) 0 else 1 }.thenBy { ran(it) }.thenBy { d -> pick.minOfOrNull { gap(it, d) } ?: 0 }.thenBy { if (it in planDays) 1 else 0 })?.let { pick += it } }
+                out += Suggestion("fewer:$n", "Plan for $n runs a week?",
+                    "You've been running about ${if (n == 2 && typical < 2) "once or twice" else if (n == 2) "twice" else "$n times"} a week and the plan asks for ${planDays.size}, so most weeks count as missed and the plan can't move on. A plan you can hit is the one that builds. Add days back any time.",
+                    "Make it $n", SetDays(pick.sorted()))
+            }
+        }
         if (ChronoUnit.DAYS.between(planStart, today) >= 21) {
             val to = (1..7).filter { it !in planDays && weeksRunOn(it) >= 3 }.maxByOrNull { weeksRunOn(it) }
             val from = planDays.filter { weeksRunOn(it) == 0 }.minByOrNull { d -> to?.let { abs(d - it).let { g -> min(g, 7 - g) } } ?: 0 }

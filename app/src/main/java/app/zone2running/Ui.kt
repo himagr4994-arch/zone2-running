@@ -91,7 +91,7 @@ fun Modifier.glassField(p: Pal): Modifier = if (!p.glass) this else drawBehind {
     val dark = p.ink.red > .5f
     drawRect(p.bg)
     fun glow(c: Color, x: Float, y: Float, r: Float) = drawRect(Brush.radialGradient(listOf(c, c.copy(alpha = 0f)), Offset(size.width * x, size.height * y), size.width * r))
-    if (dark) { glow(Color(0xFF12A58D).copy(alpha = .75f), .12f, .06f, 1.0f); glow(Color(0xFFC98A1A).copy(alpha = .55f), 1.0f, .40f, .85f); glow(Color(0xFF1F6F8F).copy(alpha = .7f), .08f, .95f, 1.1f) }
+    if (dark) { glow(Color(0xFF12A58D).copy(alpha = .75f), .12f, .06f, 1.0f); glow(Color(0xFFC98A1A).copy(alpha = .26f), 1.05f, .16f, .6f); glow(Color(0xFF1F6F8F).copy(alpha = .7f), .08f, .95f, 1.1f) }
     else { glow(Color(0xFF8FE3D1).copy(alpha = .85f), .12f, .06f, 1.0f); glow(Color(0xFFFFDC96).copy(alpha = .8f), 1.0f, .40f, .85f); glow(Color(0xFFAFD6EE).copy(alpha = .85f), .08f, .95f, 1.1f) }
 }
 

@@ -342,7 +342,11 @@ fun ProgressScreen(vm: AppVM, e: Engine, openRun: (Run) -> Unit, openForm: (Form
             val at = pts[scrub ?: pts.lastIndex]
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(fmtPace(at.second), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 44.sp, lineHeight = 44.sp, color = p.ink)
-                Small("${U.per} · ${fmtDay(at.first.date)} · ${TYPE_NAMES[at.first.type] ?: "Run"}" + if (at.first.id != "_base") " · ran ${fmtPace(paceOf(at.first))} at ${at.first.avgHr}" else "", modifier = Modifier.padding(bottom = 6.dp))
+                // Two short lines beside the number, broken where it reads, not wherever the screen runs out.
+                Column(Modifier.padding(bottom = 5.dp)) {
+                    Small("${U.per} · ${fmtDay(at.first.date)} · ${TYPE_NAMES[at.first.type] ?: "Run"}")
+                    if (at.first.id != "_base") Small("ran ${fmtPace(paceOf(at.first))} at ${at.first.avgHr} bpm")
+                }
             }
             PaceArea(pts, e.s.targetPace.toDouble(), e.today, scrub, { if (it != scrub) { scrub = it; if (it != null) tick(false) } }, Modifier.fillMaxWidth().height(170.dp),
                 line = p.accent, target = p.ink, muted = p.muted, dot = p.ink, ground = p.bg)

@@ -285,6 +285,7 @@ class AppVM(app: Application) : AndroidViewModel(app) {
     fun accept(sg: Suggestion) {
         when (val a = sg.act) {
             is MoveDay -> { updateSettings { it.copy(days = (it.days - a.from + a.to).distinct().sorted(), longDay = if (it.longDay == a.from) a.to else it.longDay) }; toast = "Plan updated" }
+            is SetDays -> { updateSettings { it.copy(days = a.days, longDay = if (it.longDay in a.days) it.longDay else a.days.last()) }; toast = "Plan set to ${a.days.size} runs a week" }
             is Remind -> { setReminder(true, a.min); toast = "Reminder set for ${fmtClock(a.min)}" }
             is SetRest -> { updateSettings { it.copy(restHr = a.hr) }; toast = "Zones rebuilt on a resting rate of ${a.hr}" }
             is SetMax -> { updateSettings { it.copy(maxHr = a.hr) }; toast = "Zones rebuilt on ${a.hr} bpm" }

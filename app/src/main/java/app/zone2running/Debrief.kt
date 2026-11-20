@@ -91,7 +91,8 @@ fun Engine.debrief(r: Run): Debrief {
     if (has && longest >= 18 && !interval) facts += Fact("Longest easy stretch", "${longest * TRACE_STEP / 60} min", "Unbroken under $cap bpm")
     if (r.maxHr > 0) facts += Fact("Peak", "${r.maxHr} bpm", peakAt?.let { "At ${mmss(it)}" } ?: "")
     if (r.splits.size >= 2) r.splits.withIndex().minBy { it.value.sec }.let { facts += Fact("Fastest ${U.word}", fmtPace(it.value.sec.toDouble()), "${U.word.replaceFirstChar { c -> c.uppercase() }} ${it.index + 1}") }
-    mine?.let { facts += Fact("Zone 2 reading", fmtPace(it.pace), if (it.clean) "Direct, at $refHr bpm" else "Scaled to $refHr bpm") }
+    val odd = setAside(r)
+    mine?.let { if (!odd) facts += Fact("Zone 2 reading", fmtPace(it.pace), if (it.clean) "Direct, at $refHr bpm" else "Scaled to $refHr bpm") }
     if (r.cadence > 0) facts += Fact("Cadence", "${r.cadence}", "Steps a minute")
     if (r.kcal > 0) facts += Fact("Energy", "${r.kcal} kcal")
     if (r.climb > 0) facts += Fact("Climb", "${r.climb} m")
@@ -99,6 +100,7 @@ fun Engine.debrief(r: Run): Debrief {
 
     // ---- what it means
     val learned = ArrayList<Note>()
+    if (odd) learned += Note("plain", "The heart rate recorded for this run doesn't fit your other runs, so it is left out of your Zone 2 pace and the trend chart.")
     val head: String; var next: String
     val easyPace = easyRange()?.let { " At today's fitness that is around ${fmtPace(it.first)}–${fmtPace(it.second)} ${U.per}." } ?: ""
     when {
